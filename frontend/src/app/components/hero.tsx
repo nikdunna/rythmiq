@@ -44,7 +44,7 @@ export default function Hero({ onEnterStudio }: HeroProps) {
           <h2
             className={`text-2xl md:text-3xl text-white`}
           >
-            Your music companion
+            Your Music Companion
           </h2>
         </div>
         <div className="relative z-10 text-center">
