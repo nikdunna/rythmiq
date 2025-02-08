@@ -1,12 +1,9 @@
 "use client";
-// import Hero from "./components/hero";
-// import Studio from "./components/studio";
-import { useState, useEffect } from "react";
-// import dynamic from "next/dynamic";
 import Hero from "./components/hero";
-
-import { Studio, Generator, Wrap } from "./components/gen";
-
+import Studio from "./components/studio";
+import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import Wrap from "./components/wrap";
 const Generator = dynamic(() => import("./components/generator"), {
   ssr: false,
 });

@@ -41,9 +41,7 @@ export default function Hero({ onEnterStudio }: HeroProps) {
       {/* Main content */}
       <div className="flex flex-col z-10 items-center gap-8">
         <div className="flex items-center justify-center">
-          <h2
-            className={`text-2xl md:text-3xl text-white`}
-          >
+          <h2 className={`text-2xl md:text-3xl text-white`}>
             Your Music Companion
           </h2>
         </div>
