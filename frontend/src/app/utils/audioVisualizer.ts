@@ -3,6 +3,8 @@ interface AudioVisualizerState {
   analyser: AnalyserNode | null;
   stream: MediaStream | null;
   animationFrame: number | null;
+  mediaRecorder: MediaRecorder | null;
+  audioChunks: Blob[];
 }
 
 export class AudioVisualizerUtil {
@@ -11,6 +13,8 @@ export class AudioVisualizerUtil {
     analyser: null,
     stream: null,
     animationFrame: null,
+    mediaRecorder: null,
+    audioChunks: [],
   };
 
   constructor(private canvasRef: React.RefObject<HTMLCanvasElement>) {}
@@ -19,6 +23,9 @@ export class AudioVisualizerUtil {
     if (this.state.animationFrame) {
       cancelAnimationFrame(this.state.animationFrame);
       this.state.animationFrame = null;
+    }
+    if (this.state.mediaRecorder && this.state.mediaRecorder.state !== 'inactive') {
+      this.state.mediaRecorder.stop();
     }
     if (this.state.stream) {
       this.state.stream.getTracks().forEach((track) => track.stop());
@@ -29,16 +36,13 @@ export class AudioVisualizerUtil {
       this.state.audioContext = null;
     }
     this.state.analyser = null;
+    this.state.mediaRecorder = null;
+    this.state.audioChunks = [];
   };
 
   startVisualization = async () => {
     try {
       this.cleanup(); // Ensure no previous audio context is active
-
-      // Ensure storage access (Safari/Firefox privacy fix)
-      if (document.requestStorageAccess) {
-        await document.requestStorageAccess().catch(console.warn);
-      }
 
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -68,10 +72,28 @@ export class AudioVisualizerUtil {
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
 
+      // Initialize MediaRecorder with specific MIME type
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+      });
+      
+      this.state.audioChunks = [];
+      
+      // Collect data every second
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.state.audioChunks.push(event.data);
+        }
+      };
+
       // Store references
       this.state.audioContext = audioContext;
       this.state.analyser = analyser;
       this.state.stream = stream;
+      this.state.mediaRecorder = mediaRecorder;
+
+      // Start recording with 1 second timeslices
+      mediaRecorder.start(1000);
 
       // Start drawing
       if (this.canvasRef.current) {
@@ -84,6 +106,27 @@ export class AudioVisualizerUtil {
       this.cleanup();
       throw err;
     }
+  };
+
+  stopRecording = async (): Promise<Blob> => {
+    return new Promise((resolve) => {
+      if (this.state.mediaRecorder && this.state.mediaRecorder.state !== 'inactive') {
+        // Get final chunk of data
+        this.state.mediaRecorder.requestData();
+        
+        this.state.mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(this.state.audioChunks, { 
+            type: 'audio/webm;codecs=opus' 
+          });
+          this.cleanup();
+          resolve(audioBlob);
+        };
+        this.state.mediaRecorder.stop();
+      } else {
+        this.cleanup();
+        resolve(new Blob([]));
+      }
+    });
   };
 
   private drawWaveform = () => {
@@ -137,6 +180,6 @@ export class AudioVisualizerUtil {
   };
 
   isActive = () => {
-    return this.state.audioContext !== null;
+    return this.state.mediaRecorder !== null && this.state.mediaRecorder.state === 'recording';
   };
 } 
