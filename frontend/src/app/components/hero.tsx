@@ -1,20 +1,37 @@
+"use client";
 import "../globals.css";
-import { Monoton, Noto_Sans } from "next/font/google";
+import { Monoton } from "next/font/google";
+import { useState } from "react";
 
 const monoton = Monoton({
   weight: "400",
   subsets: ["latin"],
 });
 
-const notoSans = Noto_Sans({
-  weight: "400",
-  subsets: ["latin"],
-  variable: "--font-noto-sans",
-});
+interface HeroProps {
+  onEnterStudio: () => void;
+}
 
-export default function Hero() {
+export default function Hero({ onEnterStudio }: HeroProps) {
+  const [isVisible, setIsVisible] = useState(true);
+  const [isFading, setIsFading] = useState(false);
+
+  const handleEnterClick = () => {
+    setIsFading(true);
+    setTimeout(() => {
+      setIsVisible(false);
+      onEnterStudio();
+    }, 500);
+  };
+
+  if (!isVisible) return null;
+
   return (
-    <div className="relative h-screen flex items-center justify-center overflow-hidden bg-black">
+    <div
+      className={`relative h-screen flex items-center justify-center overflow-hidden bg-black ${
+        isFading ? "fade-out" : ""
+      }`}
+    >
       {/* Retro gradient background */}
       <div className="absolute inset-0 bg-gradient-to-br from-burgundy via-syracuse-red-orange to-orange-web opacity-20"></div>
 
@@ -22,10 +39,10 @@ export default function Hero() {
       <div className="absolute inset-0 bg-[linear-gradient(transparent_1px,_transparent_1px),_linear-gradient(90deg,_rgba(255,255,255,0.1)_1px,_transparent_1px)] bg-[size:30px_30px] [mask-image:radial-gradient(ellipse_80%_80%_at_50%_50%,black,transparent)]"></div>
 
       {/* Main content */}
-      <div className="flex flex-col z-10">
+      <div className="flex flex-col z-10 items-center gap-8">
         <div className="flex items-center justify-center">
           <h2
-            className={`${notoSans.className} text-2xl md:text-3xl text-white`}
+            className={`text-2xl md:text-3xl text-white`}
           >
             Your music companion
           </h2>
@@ -42,6 +59,13 @@ export default function Hero() {
             <div className="h-2 w-24 bg-orange-web rounded-full animate-pulse delay-150"></div>
           </div>
         </div>
+
+        <button
+          onClick={handleEnterClick}
+          className="hero-button mt-8 px-8 py-3 rounded-full text-white text-lg font-semibold"
+        >
+          Enter the studio
+        </button>
       </div>
 
       {/* Retro shine effect */}
