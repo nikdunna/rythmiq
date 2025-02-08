@@ -2,6 +2,7 @@
 import "../globals.css";
 import { useEffect, useState } from "react";
 import { Monoton } from "next/font/google";
+import { moveMessagePortToContext } from "worker_threads";
 
 const monoton = Monoton({
   weight: "400",
@@ -15,6 +16,47 @@ if (typeof window !== "undefined") {
   mm = require("@magenta/music");
   Tone = require("tone");
 }
+
+const patchMagentaGrooveConverter = () => {
+  if (!mm) return;
+
+  try {
+    const GrooveConverter = mm.data.GrooveConverter;
+    
+    if (GrooveConverter) {
+      const originalToTensor = GrooveConverter.prototype.toTensor;
+
+      GrooveConverter.prototype.toTensor = function (noteSequence: any) {
+        if (!noteSequence || !noteSequence.notes) {
+          console.warn("⚠ GrooveConverter received an invalid NoteSequence.");
+          return originalToTensor.call(this, { notes: [], tempos: [{ time: 0, qpm: 120 }], totalTime: 0 });
+        }
+
+        // ✅ Fix missing properties
+        noteSequence.notes = noteSequence.notes.map((note: any) => ({
+          ...note,
+          startTime: note.startTime ?? 0,
+          endTime: note.endTime ?? (note.startTime ?? 0) + 0.25,
+          velocity: note.velocity ?? 100,
+          program: note.isDrum ? 0 : 24, // Default electric guitar if not a drum
+          isDrum: note.isDrum ?? false,
+          quantizedStartStep: note.quantizedStartStep ?? 0,
+          quantizedEndStep: note.quantizedEndStep ?? 1,
+        }));
+
+        if (!noteSequence.tempos || noteSequence.tempos.length === 0) {
+          noteSequence.tempos = [{ time: 0, qpm: 120 }];
+        }
+
+        return originalToTensor.call(this, noteSequence);
+      };
+
+      console.log("✅ Patched GrooveConverter.toTensor to prevent crashes.");
+    }
+  } catch (err) {
+    console.error("❌ Failed to patch GrooveConverter.toTensor:", err);
+  }
+};
 
 const initializeModules = async () => {
   if (typeof window !== "undefined") {
@@ -59,6 +101,7 @@ const initializeModules = async () => {
             );
             this.programOutputs = new Map<number, any>(); // ✅ Explicitly typed Map
           }
+          patchMagentaGrooveConverter();
 
           // ✅ Ensure the program exists before accessing `.has()`
           if (!this.programOutputs.has(program)) {
@@ -223,7 +266,7 @@ export default function Generator({
         const musicVAE = new mm.MusicVAE(
           "https://storage.googleapis.com/magentadata/js/checkpoints/groovae/tap2drum_2bar"
         );
-
+        // Warm up the model.
         setModelStatus("Warming up the model...");
         await musicVAE.initialize();
         setModel(musicVAE);
@@ -246,28 +289,32 @@ export default function Generator({
   }, []);
 
   const generateAccompaniment = async () => {
-    if (!model || !mm || !inputSequence) {
+    if (
+      !model ||
+      !mm ||
+      !inputSequence ||
+      !inputSequence.notes ||
+      inputSequence.notes.length === 0
+    ) {
       setError("Model or input sequence not ready");
       return;
     }
 
-    setIsGenerating(true);
     try {
-      setModelStatus("Generating accompaniment...");
+      const processedSequence: NoteSequence =
+        preprocessNoteSequence(inputSequence);
 
-      // Generate accompaniment with higher temperature for more variation
-      const z = await model.encode([inputSequence]);
-      console.log("Encoded latent:", z);
-
-      const temperature = 0.8; // Higher temperature for more variation
+      const temperature = 0.6; // Higher temperature for more variation
       console.log("Using temperature:", temperature);
 
+      const tempo = inputSequence.tempos[0].qpm;
+      const z = await model.encode([processedSequence]);
       // Generate multiple sequences and pick the best one
       const numTries = 15; // More attempts for better results
       let drumSequence = null;
       let maxScore = 0;
-      const tempo = inputSequence.tempos[0].qpm;
 
+    
       for (let i = 0; i < numTries; i++) {
         console.log(`Generation attempt ${i + 1}/${numTries}`);
         const sequences = await model.decode(
@@ -332,6 +379,7 @@ export default function Generator({
       }
       // Store generated sequences
       setGeneratedTracks({ drums: drumSequence, bass: null });
+      setInputSequence(processedSequence);
 
       z.dispose();
 
@@ -344,18 +392,38 @@ export default function Generator({
     }
   };
 
+  const preprocessNoteSequence = (sequence: NoteSequence): NoteSequence => {
+    if (!sequence || !sequence.notes || sequence.notes.length === 0)
+      throw new Error("Invalid sequence input.");
+
+    return {
+      ...sequence,
+      notes: sequence.notes.map((note) => ({
+        ...note,
+        program: note.isDrum ? 0 : 24, // Assign correct program
+        startTime: note.startTime ?? 0,
+        endTime: note.endTime ?? (note.startTime ?? 0) + 0.25,
+        velocity: note.velocity ?? 100,
+        isDrum: note.isDrum ?? false,
+      })),
+      tempos:
+        sequence.tempos && sequence.tempos.length > 0
+          ? sequence.tempos
+          : [{ time: 0, qpm: 120 }],
+      totalTime:
+        sequence.totalTime ||
+        Math.max(...sequence.notes.map((n) => n.endTime ?? 0), 8),
+      quantizationInfo: sequence.quantizationInfo || { stepsPerQuarter: 4 },
+    };
+  };
+
   const playSample = async (sequence: NoteSequence | null) => {
     if (!sequence || !mm || !Tone || !sequence.notes.length) return;
 
     try {
       // Stop existing playback if already playing
       if (isPlaying && currentPlayer) {
-        if (currentPlayer.currentPart) {
-          currentPlayer.currentPart.stop();
-          currentPlayer.currentPart.mute = true;
-        }
-        // Tone.Transport.clear(currentPlayer.scheduledStop);
-        currentPlayer.scheduledStop = undefined;
+        currentPlayer.stop();
         setCurrentPlayer(null);
         setIsPlaying(false);
         setModelStatus("Playback stopped");
@@ -364,39 +432,24 @@ export default function Generator({
 
       console.log("🔍 Starting playback of sequence:", sequence);
 
-      // Get the start time of the first note
-      const firstNoteStartTime = sequence.notes[0].startTime || 0;
-
       // ✅ Fix the timing of the notes
-      const processedSequence = {
-        ...sequence,
-        notes: sequence.notes
-          .map((note) => ({
-            ...note,
-            startTime: (note.startTime || 0) - firstNoteStartTime,
-            endTime: (note.endTime || note.startTime || 0) - firstNoteStartTime,
-            program: note.isDrum ? note.program : 24, // Keep drums, ensure guitar
-            velocity: note.velocity || 100, // Ensure good default velocity
-          }))
-          .sort((a, b) => a.startTime - b.startTime),
-        totalTime: (60 / 120) * 4 * 2, // 2 bars at 120 BPM
-      };
+      const quant = mm.sequences.quantizeNoteSequence(sequence, 4);
+      const unquant = mm.sequences.unquantizeSequence(quant);
 
-      // // ✅ Initialize Tone.js audio context
-      // if (!Tone.context || Tone.context.state !== "running") {
-      //   await Tone.start();
-      //   await Tone.context.resume();
-      // }
-
-      // ✅ Create MIDI player
-      const player = new mm.MIDIPlayer();
-
-      // Set MIDI output if available
-      if (midiOutput) {
-        player.outputs = [midiOutput];
-      } else {
-        throw new Error("No MIDI output available");
+      for (let i = 0; i < unquant.notes.length; i++) {
+        delete unquant.notes[i].quantizedStartStep;
+        delete unquant.notes[i].quantizedEndStep;
       }
+      delete unquant.totalQuantizedSteps;
+      delete unquant.quantizationInfo;
+
+      const processedSequence = unquant;
+
+      // ✅ Initialize SoundFontPlayer
+      const player = new mm.SoundFontPlayer(
+        "https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus",
+        Tone.Master
+      );
 
       // Set up callback for note events
       player.callbackObject = {
@@ -432,7 +485,7 @@ export default function Generator({
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Start the sequence
-      await player.start(processedSequence);
+      player.start(processedSequence);
 
       console.log("✅ Playback started successfully");
     } catch (error) {

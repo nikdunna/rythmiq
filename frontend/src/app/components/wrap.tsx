@@ -1,6 +1,6 @@
 "use client"; // Ensure this runs only on the client side
 import "../globals.css";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Monoton } from "next/font/google";
 
 const monoton = Monoton({
@@ -59,17 +59,21 @@ export default function Wrap({
     }, 500); // Match this with your fade-out animation duration
   };
 
-  // ✅ **Dynamic Combination of Input & Drum Sequences**
   const getCombinedSequences = (): NoteSequence | null => {
-    const sequences = [drumSequence, inputSequence].filter(Boolean); // Remove null values
+    console.log("Input sequences:", {
+      drumSequence,
+      inputSequence,
+      drumNotes: drumSequence?.notes?.length,
+      inputNotes: inputSequence?.notes?.length,
+    });
+
+    const sequences = [drumSequence, inputSequence].filter(Boolean);
+    console.log("Filtered sequences:", sequences.length);
 
     if (sequences.length === 0) {
       console.warn("⚠️ No sequences available to combine.");
       return null;
     }
-
-    console.log("🎼 Drum Sequence:", drumSequence);
-    console.log("🎵 Input Sequence:", inputSequence);
 
     const combinedSequence: NoteSequence = {
       notes: [],
@@ -83,33 +87,23 @@ export default function Wrap({
 
     sequences.forEach((seq) => {
       if (!seq || !seq.notes) return;
-
       seq.notes.forEach((note) => {
         combinedSequence.notes.push({
-          ...note,
-          program: note.program || 0, // Ensure default program if missing
+          pitch: note.pitch,
+          startTime: note.startTime || 0,
+          endTime: note.endTime || (note.startTime || 0) + 0.25,
+          velocity: note.velocity,
+          program: note.isDrum ? 0 : note.program || 24,
+          isDrum: note.isDrum || false,
         });
       });
 
-      // ✅ **Update sequence duration**
-      combinedSequence.totalQuantizedSteps = Math.max(
-        combinedSequence.totalQuantizedSteps || 0,
-        seq.totalQuantizedSteps || 0
-      );
       combinedSequence.totalTime = Math.max(
-        combinedSequence.totalTime || 0,
-        seq.totalTime || 0
+        combinedSequence.totalTime || 8,
+        seq.totalTime || 8
       );
     });
 
-    // ✅ **Sort notes by start time**
-    combinedSequence.notes.sort((a, b) => {
-      const aStart = a.quantizedStartStep || a.startTime || 0;
-      const bStart = b.quantizedStartStep || b.startTime || 0;
-      return aStart - bStart;
-    });
-
-    console.log("🎶 Combined Sequence:", combinedSequence);
     return combinedSequence;
   };
 
@@ -135,44 +129,58 @@ export default function Wrap({
         return;
       }
 
-      // ✅ **Ensure Tone.js is active**
-      if (!Tone.context || Tone.context.state !== "running") {
-        await Tone.start();
+      // ✅ Fix the timing of the notes
+      const quant = mm.sequences.quantizeNoteSequence(combinedSequence, 4);
+      const unquant = mm.sequences.unquantizeSequence(quant);
+
+      for (let i = 0; i < unquant.notes.length; i++) {
+        delete unquant.notes[i].quantizedStartStep;
+        delete unquant.notes[i].quantizedEndStep;
       }
+      delete unquant.totalQuantizedSteps;
+      delete unquant.quantizationInfo;
+
+      const processedSequence = unquant;
 
       // ✅ **Create Player**
       const player = new mm.SoundFontPlayer(
         "https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus",
-        undefined,
-        Tone.context,
-        undefined,
-        {
-          run: (note: any) => {
-            console.log("🎵 Playing note:", {
-              pitch: note.pitch,
-              velocity: note.velocity,
-              isDrum: note.isDrum,
-              program: note.program,
-              startTime: note.startTime,
-              endTime: note.endTime,
-            });
-          },
-          stop: () => {
-            setStatus("Playback complete");
-            setCurrentPlayer(null);
-            setIsPlaying(false);
-          },
-        }
+        Tone.Master
       );
+
+      // Set up callback for note events
+      player.callbackObject = {
+        run: (note: {
+          pitch: number;
+          velocity: number;
+          startTime: number;
+          endTime: number;
+          program: number;
+        }) => {
+          console.log("🎵 Playing note:", {
+            pitch: note.pitch,
+            velocity: note.velocity,
+            startTime: note.startTime,
+            endTime: note.endTime,
+            program: note.program,
+          });
+        },
+        stop: () => {
+          console.log("⏹ Playback stopped");
+          setIsPlaying(false);
+          setCurrentPlayer(null);
+          setStatus("Playback complete");
+        },
+      };
 
       // ✅ **Load & Play**
       setStatus("Loading samples...");
-      await player.loadSamples(combinedSequence);
+      await player.loadSamples(processedSequence);
 
       setIsPlaying(true);
       setCurrentPlayer(player);
       setStatus("Playing combined track...");
-      await player.start(combinedSequence);
+      await player.start(processedSequence);
     } catch (err) {
       console.error("❌ Playback error:", err);
       setError("Failed to play combined sequence");
