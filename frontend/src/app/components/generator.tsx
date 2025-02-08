@@ -264,7 +264,7 @@ export default function Generator({
 
         setModelStatus("Loading Magenta model...");
         const musicVAE = new mm.MusicVAE(
-          "https://storage.googleapis.com/magentadata/js/checkpoints/groovae/tap2drum_2bar"
+          "https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/groovae_4bar"
         );
         // Warm up the model.
         setModelStatus("Warming up the model...");
