@@ -2,14 +2,10 @@
 import Hero from "./components/hero";
 import Studio from "./components/studio";
 import { useState } from "react";
-<<<<<<< HEAD
-import Generator from "./components/generator";
 import { pinata } from "@/app/utils/config";
-=======
 import dynamic from "next/dynamic";
 
 const Generator = dynamic(() => import("./components/generator"), { ssr: false });
->>>>>>> origin/main
 
 export default function Home() {
   const [showStudio, setShowStudio] = useState(false);
