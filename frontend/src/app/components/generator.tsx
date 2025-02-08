@@ -84,17 +84,6 @@ if (typeof window !== "undefined") {
   initializeModules().catch(console.error);
 }
 
-interface GeneratorProps {
-  audioURL: string | null;
-  show: boolean;
-  onClose?: (params: {
-    drumSequence: NoteSequence | null;
-    inputSequence: NoteSequence | null;
-  }) => void;
-  onBack?: () => void;
-  onNext?: () => void;
-}
-
 interface NoteSequence {
   notes: Array<{
     pitch: number;
@@ -112,6 +101,17 @@ interface NoteSequence {
   totalQuantizedSteps?: number;
 }
 
+interface GeneratorProps {
+  audioURL: string | null;
+  show: boolean;
+  onClose?: (params: {
+    drumSequence: NoteSequence | null;
+    inputSequence: NoteSequence | null;
+  }) => void;
+  onBack?: () => void;
+  onNext?: () => void;
+}
+
 export default function Generator({
   audioURL,
   show,
@@ -127,16 +127,70 @@ export default function Generator({
   const [currentPlayer, setCurrentPlayer] = useState<any>(null);
   const [inputSequence, setInputSequence] = useState<NoteSequence | null>(null);
   const [isFading, setIsFading] = useState(false);
+  const [midiOutput, setMidiOutput] = useState<any>(null);
   const [generatedTracks, setGeneratedTracks] = useState<{
     drums: NoteSequence | null;
     bass: NoteSequence | null;
   }>({ drums: null, bass: null });
 
+  // Initialize MIDI output
+  useEffect(() => {
+    const initMIDI = async () => {
+      try {
+        if (navigator.requestMIDIAccess) {
+          const midiAccess = await navigator.requestMIDIAccess();
+          const outputs = Array.from(midiAccess.outputs.values());
+          if (outputs.length > 0) {
+            setMidiOutput(outputs[0]);
+            console.log("✅ MIDI output initialized:", outputs[0].name);
+          } else {
+            console.log("⚠ No MIDI outputs available");
+          }
+        } else {
+          console.log("⚠ Web MIDI API not supported");
+        }
+      } catch (err) {
+        console.error("❌ Error initializing MIDI:", err);
+      }
+    };
+
+    initMIDI();
+  }, []);
+
+  // Parse the input NoteSequence from the base64 URL
+  useEffect(() => {
+    if (audioURL) {
+      try {
+        console.log("Received audioURL:", audioURL); // Debug log
+        const base64Data = audioURL.split(",")[1];
+        const jsonStr = atob(base64Data);
+        console.log("Decoded JSON:", jsonStr); // Debug log
+        const sequence = JSON.parse(jsonStr) as NoteSequence;
+
+        // Set program to 24 (electric guitar nylon) for all notes
+        sequence.notes = sequence.notes.map((note) => ({
+          ...note,
+          program: 24, // Electric guitar nylon
+        }));
+
+        console.log(
+          "Parsed sequence in Generator with guitar program:",
+          sequence
+        );
+        console.log("First note timing and program:", sequence.notes[0]);
+        setInputSequence(sequence);
+      } catch (err) {
+        console.error("Failed to parse input sequence:", err);
+        setError("Failed to parse input sequence");
+      }
+    }
+  }, [audioURL]);
+
   const handleBack = () => {
     setIsFading(true);
     setTimeout(() => {
       onBack?.();
-    }, 500); // Match this with your fade-out animation duration
+    }, 500);
   };
 
   const handleNext = () => {
@@ -191,86 +245,18 @@ export default function Generator({
     };
   }, []);
 
-  // Create a sequence with melody, drums, and bass
-  const analyzeAudio = async (audioUrl: string): Promise<NoteSequence> => {
-    setModelStatus("Analyzing audio...");
-
-    // Create a sequence with melody, drums, and bass
-    const sequence: NoteSequence = {
-      notes: [
-        // 🎶 **Melody (Program 0 - Piano) - C Major Scale**
-        ...Array.from({ length: 12 }, (_, i) => ({
-          pitch: [60, 62, 64, 67, 65, 69, 71, 72, 74, 76, 77, 79][i % 12],
-          quantizedStartStep: i * 2, // Notes every 2 steps
-          quantizedEndStep: i * 2 + (i % 4 === 0 ? 3 : 2), // Longer every 4th note
-          velocity: 85 + (i % 3) * 10, // Adds natural volume variation
-          program: 0,
-          isDrum: false,
-          startTime: i * 0.25, // Faster pacing
-          endTime: i * 0.25 + (i % 4 === 0 ? 0.75 : 0.5),
-        })),
-
-        // 🎵 **Syncopated notes for expressiveness**
-        ...Array.from({ length: 6 }, (_, i) => ({
-          pitch: [61, 66, 70, 73, 75, 78][i], // Grace note additions
-          quantizedStartStep: i * 4 + 1, // Slight offset for syncopation
-          quantizedEndStep: i * 4 + 2,
-          velocity: 75 + (i % 2) * 10,
-          program: 0,
-          isDrum: false,
-          startTime: i * 0.5 + 0.1, // Syncopation effect
-          endTime: i * 0.5 + 0.25,
-        })),
-
-        // 🎼 **Longer Sustained Notes for Contrast**
-        ...Array.from({ length: 3 }, (_, i) => ({
-          pitch: [72, 74, 76][i], // Higher notes for contrast
-          quantizedStartStep: i * 8,
-          quantizedEndStep: i * 8 + 6, // Holding longer notes
-          velocity: 100,
-          program: 0,
-          isDrum: false,
-          startTime: i * 1.0,
-          endTime: i * 1.0 + 1.5,
-        })),
-      ],
-      quantizationInfo: { stepsPerQuarter: 4 },
-      tempos: [{ time: 0, qpm: 120 }],
-      totalQuantizedSteps: 32, // ✅ Model limit
-      totalTime: 8.0, // ✅ Matches 32-step limit
-    };
-
-    // unquantized -> quantized -> unquantized
-    const quant = mm.sequences.quantizeNoteSequence(sequence, 4);
-    const unquant = mm.sequences.unquantizeSequence(quant);
-
-    for (let i = 0; i < unquant.notes.length; i++) {
-      delete unquant.notes[i].quantizedStartStep;
-      delete unquant.notes[i].quantizedEndStep;
-    }
-    delete unquant.totalQuantizedSteps;
-    delete unquant.quantizationInfo;
-
-    setInputSequence(sequence); // Store the input sequence
-
-    return unquant;
-  };
-
   const generateAccompaniment = async () => {
-    if (!model || !mm || !audioURL) {
-      setError("Model not ready yet");
+    if (!model || !mm || !inputSequence) {
+      setError("Model or input sequence not ready");
       return;
     }
 
     setIsGenerating(true);
     try {
-      // Analyze input audio
-      const sequence = await analyzeAudio(audioURL);
-      console.log("Input sequence:", sequence);
       setModelStatus("Generating accompaniment...");
 
       // Generate accompaniment with higher temperature for more variation
-      const z = await model.encode([sequence]);
+      const z = await model.encode([inputSequence]);
       console.log("Encoded latent:", z);
 
       const temperature = 0.8; // Higher temperature for more variation
@@ -280,7 +266,7 @@ export default function Generator({
       const numTries = 15; // More attempts for better results
       let drumSequence = null;
       let maxScore = 0;
-      const tempo = sequence.tempos[0].qpm;
+      const tempo = inputSequence.tempos[0].qpm;
 
       for (let i = 0; i < numTries; i++) {
         console.log(`Generation attempt ${i + 1}/${numTries}`);
@@ -358,82 +344,99 @@ export default function Generator({
     }
   };
 
-  // Play function using Magenta.js Player
   const playSample = async (sequence: NoteSequence | null) => {
-    if (!sequence || !mm || !Tone) return;
+    if (!sequence || !mm || !Tone || !sequence.notes.length) return;
 
     try {
-      // If already playing, stop the current playback
+      // Stop existing playback if already playing
       if (isPlaying && currentPlayer) {
-        currentPlayer.stop();
+        if (currentPlayer.currentPart) {
+          currentPlayer.currentPart.stop();
+          currentPlayer.currentPart.mute = true;
+        }
+        // Tone.Transport.clear(currentPlayer.scheduledStop);
+        currentPlayer.scheduledStop = undefined;
         setCurrentPlayer(null);
         setIsPlaying(false);
         setModelStatus("Playback stopped");
         return;
       }
 
-      console.log("Starting playback of sequence:", sequence);
-      console.log("Number of notes to play:", sequence.notes.length);
-      console.log("Total duration:", sequence.totalTime);
-      console.log("Tempo:", sequence.tempos[0].qpm);
+      console.log("🔍 Starting playback of sequence:", sequence);
 
-      // Initialize audio context and Tone.js
-      if (!Tone.context || Tone.context.state !== "running") {
-        console.log("Starting Tone.js...");
-        await Tone.start();
-        console.log("Tone.js context state:", Tone.context.state);
+      // Get the start time of the first note
+      const firstNoteStartTime = sequence.notes[0].startTime || 0;
+
+      // ✅ Fix the timing of the notes
+      const processedSequence = {
+        ...sequence,
+        notes: sequence.notes
+          .map((note) => ({
+            ...note,
+            startTime: (note.startTime || 0) - firstNoteStartTime,
+            endTime: (note.endTime || note.startTime || 0) - firstNoteStartTime,
+            program: note.isDrum ? note.program : 24, // Keep drums, ensure guitar
+            velocity: note.velocity || 100, // Ensure good default velocity
+          }))
+          .sort((a, b) => a.startTime - b.startTime),
+        totalTime: (60 / 120) * 4 * 2, // 2 bars at 120 BPM
+      };
+
+      // // ✅ Initialize Tone.js audio context
+      // if (!Tone.context || Tone.context.state !== "running") {
+      //   await Tone.start();
+      //   await Tone.context.resume();
+      // }
+
+      // ✅ Create MIDI player
+      const player = new mm.MIDIPlayer();
+
+      // Set MIDI output if available
+      if (midiOutput) {
+        player.outputs = [midiOutput];
+      } else {
+        throw new Error("No MIDI output available");
       }
 
-      // Create player with SoundFont
-      console.log("Creating SoundFont player...");
-      const player = new mm.SoundFontPlayer(
-        "https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus",
-        undefined,
-        Tone.context,
-        undefined,
-        {
-          run: (note: any, currentTime: number) => {
-            console.log("Playing note:", {
-              pitch: note.pitch,
-              velocity: note.velocity,
-              startTime: currentTime,
-              endTime: currentTime + (note.endTime - note.startTime),
-              isDrum: note.isDrum,
-              program: note.program,
-            });
-          },
-          stop: () => {
-            // Only reset state if we're not already starting a new loop
-            if (!isPlaying) {
-              player.start(sequence); // Restart playback for looping
-            } else {
-              console.log("Playback stopped");
-              setModelStatus("Playback complete");
-              setCurrentPlayer(null);
-            }
-          },
-        }
-      );
-
-      // Load samples before playing
-      console.log("Loading samples...");
-      await player.loadSamples(sequence);
-      console.log("Samples loaded successfully");
+      // Set up callback for note events
+      player.callbackObject = {
+        run: (note: {
+          pitch: number;
+          velocity: number;
+          startTime: number;
+          endTime: number;
+          program: number;
+        }) => {
+          console.log("🎵 Playing note:", {
+            pitch: note.pitch,
+            velocity: note.velocity,
+            startTime: note.startTime,
+            endTime: note.endTime,
+            program: note.program,
+          });
+        },
+        stop: () => {
+          console.log("⏹ Playback stopped");
+          setIsPlaying(false);
+          setCurrentPlayer(null);
+          setModelStatus("Playback complete");
+        },
+      };
 
       // Start playback
       setIsPlaying(true);
       setCurrentPlayer(player);
       setModelStatus("Playing...");
-      console.log("Starting playback...");
-      await player.start(sequence);
-      console.log("Playback started successfully");
-    } catch (error: any) {
-      console.error("Error playing sample:", error);
-      console.error("Error details:", {
-        name: error?.name || "Unknown error",
-        message: error?.message || "No error message available",
-        stack: error?.stack || "No stack trace available",
-      });
+
+      // Add a small delay before starting playback
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Start the sequence
+      await player.start(processedSequence);
+
+      console.log("✅ Playback started successfully");
+    } catch (error) {
+      console.error("🚨 Error playing sample:", error);
       setError("Failed to play");
       setModelStatus("Playback failed");
       setIsPlaying(false);
@@ -450,51 +453,49 @@ export default function Generator({
           isFading ? "fade-out" : "fade-in"
         }`}
       >
-
         {/* Navigation Arrows */}
-      <div className="absolute top-1/2 left-6 transform -translate-y-1/2 z-20">
-        <button
-          onClick={handleBack}
-          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-8 w-8"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+        <div className="absolute top-1/2 left-6 transform -translate-y-1/2 z-20">
+          <button
+            onClick={handleBack}
+            className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
-      </div>
-      <div className="absolute top-1/2 right-6 transform -translate-y-1/2 z-20">
-        <button
-          onClick={handleNext}
-          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-8 w-8"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-8 w-8"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+          </button>
+        </div>
+        <div className="absolute top-1/2 right-6 transform -translate-y-1/2 z-20">
+          <button
+            onClick={handleNext}
+            className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 5l7 7-7 7"
-            />
-          </svg>
-        </button>
-      </div>
-
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-8 w-8"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+        </div>
 
         <div className="relative z-10 flex flex-col items-center justify-center h-full">
           <h1 className="text-white text-xl font-bold">
@@ -560,7 +561,48 @@ export default function Generator({
       <div className="relative z-10 flex flex-col items-center justify-center h-full">
         <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg text-center">
           <h2 className={`text-white text-4xl mb-6`}>Your Recorded Track</h2>
-          <audio controls src={audioURL} className="w-full mb-6" />
+
+          {/* Replace audio element with MIDI playback button */}
+          <div className="mb-6">
+            <button
+              onClick={() => playSample(inputSequence)}
+              className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              {isPlaying ? (
+                <>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Stop Input Track
+                </>
+              ) : (
+                <>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Play Input Track
+                </>
+              )}
+            </button>
+          </div>
 
           <div className="flex flex-col items-center gap-4">
             <p className="text-white text-2xl">{modelStatus}</p>

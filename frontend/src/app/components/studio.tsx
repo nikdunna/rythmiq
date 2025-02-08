@@ -3,10 +3,11 @@ import "../globals.css";
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { AudioVisualizerUtil } from "../utils/audioVisualizer";
+import { MidiCaptureUtil } from "../utils/midiCapture";
 
 interface StudioProps {
   show: boolean;
-  onAudioComplete?: (audioUrl: string) => void;
+  onAudioComplete: (audioUrl: string) => void;
   onBack?: () => void;
   onNext?: () => void;
 }
@@ -204,18 +205,38 @@ export default function Studio({
   onBack,
   onNext,
 }: StudioProps) {
-  const [mounted, setMounted] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [midiCapture, setMidiCapture] = useState<MidiCaptureUtil | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
   const [isFading, setIsFading] = useState(false);
+  const [error, setError] = useState<string>("");
+  const [tempo, setTempo] = useState(120);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    if (canvasRef.current) {
+      const canvas = canvasRef.current;
+      setMidiCapture(new MidiCaptureUtil({ current: canvas }));
+    }
+    return () => {
+      if (midiCapture) {
+        midiCapture.cleanup();
+      }
+    };
+  }, [canvasRef]);
+
+  const handleTempoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newTempo = parseInt(event.target.value);
+    setTempo(newTempo);
+    if (midiCapture) {
+      midiCapture.setTempo(newTempo);
+    }
+  };
 
   const handleBack = () => {
     setIsFading(true);
     setTimeout(() => {
       onBack?.();
-    }, 500); // Match this with your fade-out animation duration
+    }, 500);
   };
 
   const handleNext = () => {
@@ -225,11 +246,39 @@ export default function Studio({
     }, 500);
   };
 
-  if (!show || !mounted) return null;
+  const startRecording = async () => {
+    try {
+      if (!midiCapture) {
+        throw new Error("MIDI capture not initialized");
+      }
+
+      setError("");
+      setIsRecording(true);
+      await midiCapture.startCapture();
+    } catch (err: any) {
+      setError(err.message || "Failed to start MIDI recording");
+      setIsRecording(false);
+    }
+  };
+
+  const stopRecording = () => {
+    if (!midiCapture) return;
+
+    const noteSequence = midiCapture.stopCapture();
+    setIsRecording(false);
+
+    // Convert NoteSequence to a data URL for compatibility with existing flow
+    const sequenceStr = JSON.stringify(noteSequence);
+    console.log("Generated NoteSequence:", noteSequence); // Debug log
+    const dataUrl = `data:application/json;base64,${btoa(sequenceStr)}`;
+    onAudioComplete(dataUrl);
+  };
+
+  if (!show) return null;
 
   return (
     <div
-      className={`relative h-screen flex flex-col items-center justify-center overflow-hidden bg-black ${
+      className={`h-screen animated-gradient ${
         isFading ? "fade-out" : "fade-in"
       }`}
     >
@@ -278,7 +327,106 @@ export default function Studio({
         </button>
       </div>
 
-      <AudioVisualizer onAudioComplete={onAudioComplete} />
+      <div className="relative z-10 flex flex-col items-center justify-center h-full">
+        <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg">
+          <h2 className="text-white text-4xl mb-6 text-center">
+            Record Your Melody
+          </h2>
+
+          <div className="flex flex-col items-center gap-6">
+            {!isRecording && (
+              <div className="w-full flex flex-col items-center gap-2">
+                <label className="text-white text-lg">Tempo: {tempo} BPM</label>
+                <input
+                  type="range"
+                  min="60"
+                  max="200"
+                  value={tempo}
+                  onChange={handleTempoChange}
+                  className="w-full max-w-md h-2 bg-jungle-green/20 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+            )}
+
+            <canvas
+              ref={canvasRef}
+              className="w-full h-48 bg-black/40 rounded-lg"
+              width={800}
+              height={200}
+            />
+
+            <div className="flex gap-4">
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                className={`px-6 py-3 rounded-lg transition-colors ${
+                  isRecording
+                    ? "bg-burgundy hover:bg-burgundy/90"
+                    : "bg-jungle-green hover:bg-jungle-green/90"
+                } text-white text-xl flex items-center gap-2`}
+              >
+                {isRecording ? (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
+                      />
+                    </svg>
+                    Stop Recording
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19.5 12c0-4.142-3.358-7.5-7.5-7.5S4.5 7.858 4.5 12s3.358 7.5 7.5 7.5v-1.5M12 12l9 6-9-6z"
+                      />
+                    </svg>
+                    Start Recording
+                  </>
+                )}
+              </button>
+            </div>
+
+            {error && (
+              <div className="text-burgundy bg-burgundy/10 p-4 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <div className="text-white text-center">
+              <p className="text-lg">
+                Connect your MIDI keyboard and play up to 32 steps.
+              </p>
+              <p className="text-sm opacity-70">
+                The metronome will count in for 2 bars before recording starts.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
