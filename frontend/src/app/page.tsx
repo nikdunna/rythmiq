@@ -2,7 +2,10 @@
 import Hero from "./components/hero";
 import Studio from "./components/studio";
 import { useState } from "react";
-import Generator from "./components/generator";
+import dynamic from "next/dynamic";
+
+const Generator = dynamic(() => import("./components/generator"), { ssr: false });
+
 export default function Home() {
   const [showStudio, setShowStudio] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);

@@ -142,3 +142,64 @@ audio::-webkit-media-controls-current-time-display,
 audio::-webkit-media-controls-time-remaining-display {
   color: white;
 }
+
+@keyframes gradientFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes gradientReveal {
+  0% {
+    background: black;
+    opacity: 1;
+  }
+  100% {
+    background: linear-gradient(
+      -45deg,
+      var(--jungle-green),
+      var(--celadon),
+      var(--orange-web),
+      var(--syracuse-red-orange),
+      var(--burgundy)
+    );
+    opacity: 1;
+  }
+}
+
+.animated-gradient {
+  position: relative;
+}
+
+.animated-gradient::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    -45deg,
+    var(--jungle-green),
+    var(--celadon),
+    var(--orange-web),
+    var(--syracuse-red-orange),
+    var(--burgundy)
+  );
+  background-size: 400% 400%;
+  animation: gradientFlow 5s ease infinite;
+  opacity: 0;
+  animation: fadeIn 1s ease-out forwards;
+}
+
+.animated-gradient::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: black;
+  animation: fadeOut 1.5s ease-out forwards;
+  pointer-events: none;
+}
