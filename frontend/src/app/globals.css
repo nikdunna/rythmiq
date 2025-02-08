@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+
 :root {
   --jungle-green: #2BAF90;
   --celadon: #A1D4B1;
@@ -48,4 +49,21 @@
 
 .text-burgundy {
   color: var(--burgundy);
+}
+
+@keyframes glow {
+  0%, 100% {
+    text-shadow: 0 0 30px rgba(255,255,255,0.6),
+                0 0 60px rgba(241,165,18,0.4),
+                0 0 100px rgba(221,65,17,0.2);
+  }
+  50% {
+    text-shadow: 0 0 40px rgba(255,255,255,0.8),
+                0 0 80px rgba(241,165,18,0.6),
+                0 0 120px rgba(221,65,17,0.4);
+  }
+}
+
+.animate-glow {
+  animation: glow 3s ease-in-out infinite;
 }
