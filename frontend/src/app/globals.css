@@ -163,11 +163,9 @@ audio::-webkit-media-controls-time-remaining-display {
   100% {
     background: linear-gradient(
       -45deg,
-      var(--jungle-green),
-      var(--celadon),
-      var(--orange-web),
+      var(--burgundy),
       var(--syracuse-red-orange),
-      var(--burgundy)
+      var(--orange-web)
     );
     opacity: 1;
   }
@@ -196,6 +194,64 @@ audio::-webkit-media-controls-time-remaining-display {
 }
 
 .animated-gradient::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: black;
+  animation: fadeOut 1.5s ease-out forwards;
+  pointer-events: none;
+}
+
+.animated-gradient-generator {
+  position: relative;
+}
+
+.animated-gradient-generator::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    -45deg,
+    var(--burgundy),
+    var(--syracuse-red-orange),
+    var(--orange-web)
+  );
+  background-size: 400% 400%;
+  animation: gradientFlow 5s ease infinite;
+  opacity: 0;
+  animation: fadeIn 1s ease-out forwards;
+}
+
+.animated-gradient-generator::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: black;
+  animation: fadeOut 1.5s ease-out forwards;
+  pointer-events: none;
+}
+
+.animated-gradient-wrap {
+  position: relative;
+}
+
+.animated-gradient-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    -45deg,
+    var(--jungle-green),
+    var(--celadon),
+    var(--orange-web)
+  );
+  background-size: 400% 400%;
+  animation: gradientFlow 5s ease infinite;
+  opacity: 0;
+  animation: fadeIn 1s ease-out forwards;
+}
+
+.animated-gradient-wrap::after {
   content: '';
   position: absolute;
   inset: 0;

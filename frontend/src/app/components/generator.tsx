@@ -1,6 +1,12 @@
 "use client"; // Ensure this runs only on the client side
 import "../globals.css";
 import { useEffect, useState } from "react";
+import { Monoton } from "next/font/google";
+
+const monoton = Monoton({
+  weight: "400",
+  subsets: ["latin"],
+});
 
 let mm: any;
 let Tone: any;
@@ -15,22 +21,28 @@ const initializeModules = async () => {
     try {
       const magentaModule = await import("@magenta/music");
       const ToneModule = await import("tone");
-
+      const mmcore = await import("@magenta/music").then((m) => m.sequences);
       // Initialize Tone.js properly
       Tone = ToneModule;
       await Tone.start();
       console.log("Tone.js started, context state:", Tone.context.state);
 
-      // ✅ Override Magenta.js’s internal Tone.js reference
+      // ✅ Override Magenta.js's internal Tone.js reference
       (window as any).Tone = Tone;
-      Object.defineProperty(magentaModule, "Tone", {
-        get: () => Tone,
-        set: () => {},
-      });
+
+      // Try to set Magenta's Tone reference, but don't error if it fails
+      try {
+        Object.defineProperty(magentaModule, "Tone", {
+          configurable: true,
+          get: () => Tone,
+          set: () => {},
+        });
+      } catch (e) {
+        console.log("Tone property already set on Magenta module");
+      }
 
       mm = magentaModule;
-
-      console.log("✅ Magenta.js is now using the correct Tone.js version.");
+      console.log("✅ Magenta.js initialized");
 
       // ✅ 🔥 PATCH SoundFontPlayer to prevent `programOutputs.has` error
       if (mm.SoundFontPlayer) {
@@ -75,6 +87,10 @@ if (typeof window !== "undefined") {
 interface GeneratorProps {
   audioURL: string | null;
   show: boolean;
+  onClose?: (params: {
+    drumSequence: NoteSequence | null;
+    inputSequence: NoteSequence | null;
+  }) => void;
 }
 
 interface NoteSequence {
@@ -94,11 +110,14 @@ interface NoteSequence {
   totalQuantizedSteps?: number;
 }
 
-export default function Generator({ audioURL, show }: GeneratorProps) {
+export default function Generator({ audioURL, show, onClose }: GeneratorProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [model, setModel] = useState<any | null>(null);
   const [modelStatus, setModelStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentPlayer, setCurrentPlayer] = useState<any>(null);
+  const [inputSequence, setInputSequence] = useState<NoteSequence | null>(null);
   const [generatedTracks, setGeneratedTracks] = useState<{
     drums: NoteSequence | null;
     bass: NoteSequence | null;
@@ -188,7 +207,20 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
       totalTime: 8.0, // ✅ Matches 32-step limit
     };
 
-    return sequence;
+    // unquantized -> quantized -> unquantized
+    const quant = mm.sequences.quantizeNoteSequence(sequence, 4);
+    const unquant = mm.sequences.unquantizeSequence(quant);
+
+    for (let i = 0; i < unquant.notes.length; i++) {
+      delete unquant.notes[i].quantizedStartStep;
+      delete unquant.notes[i].quantizedEndStep;
+    }
+    delete unquant.totalQuantizedSteps;
+    delete unquant.quantizationInfo;
+
+    setInputSequence(sequence); // Store the input sequence
+
+    return unquant;
   };
 
   const generateAccompaniment = async () => {
@@ -200,12 +232,12 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
     setIsGenerating(true);
     try {
       // Analyze input audio
-      const inputSequence = await analyzeAudio(audioURL);
-      console.log("Input sequence:", inputSequence);
+      const sequence = await analyzeAudio(audioURL);
+      console.log("Input sequence:", sequence);
       setModelStatus("Generating accompaniment...");
 
       // Generate accompaniment with higher temperature for more variation
-      const z = await model.encode([inputSequence]);
+      const z = await model.encode([sequence]);
       console.log("Encoded latent:", z);
 
       const temperature = 0.8; // Higher temperature for more variation
@@ -215,7 +247,7 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
       const numTries = 15; // More attempts for better results
       let drumSequence = null;
       let maxScore = 0;
-      const tempo = inputSequence.tempos[0].qpm;
+      const tempo = sequence.tempos[0].qpm;
 
       for (let i = 0; i < numTries; i++) {
         console.log(`Generation attempt ${i + 1}/${numTries}`);
@@ -266,6 +298,19 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
       console.log("Total notes in best sequence:", drumSequence.notes.length);
       console.log("Score of best sequence:", maxScore);
 
+      // Some drums are too quiet and they don't sound great, so mute them completely.
+      for (let i = 0; i < drumSequence.notes.length; i++) {
+        const note = drumSequence.notes[i];
+        note.instrument = 1;
+        if (note.velocity < 10) {
+          note.velocity = 0;
+        }
+      }
+
+      // Sometimes the first drum comes with a startTime < 0, so fix that.
+      if (drumSequence.notes[0].startTime < 0) {
+        drumSequence.notes[0].startTime = 0;
+      }
       // Store generated sequences
       setGeneratedTracks({ drums: drumSequence, bass: null });
 
@@ -285,6 +330,15 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
     if (!sequence || !mm || !Tone) return;
 
     try {
+      // If already playing, stop the current playback
+      if (isPlaying && currentPlayer) {
+        currentPlayer.stop();
+        setCurrentPlayer(null);
+        setIsPlaying(false);
+        setModelStatus("Playback stopped");
+        return;
+      }
+
       console.log("Starting playback of sequence:", sequence);
       console.log("Number of notes to play:", sequence.notes.length);
       console.log("Total duration:", sequence.totalTime);
@@ -316,8 +370,14 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
             });
           },
           stop: () => {
-            console.log("Playback stopped");
-            setModelStatus("Playback complete");
+            // Only reset state if we're not already starting a new loop
+            if (!isPlaying) {
+              player.start(sequence); // Restart playback for looping
+            } else {
+              console.log("Playback stopped");
+              setModelStatus("Playback complete");
+              setCurrentPlayer(null);
+            }
           },
         }
       );
@@ -328,6 +388,8 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
       console.log("Samples loaded successfully");
 
       // Start playback
+      setIsPlaying(true);
+      setCurrentPlayer(player);
       setModelStatus("Playing...");
       console.log("Starting playback...");
       await player.start(sequence);
@@ -341,6 +403,8 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
       });
       setError("Failed to play");
       setModelStatus("Playback failed");
+      setIsPlaying(false);
+      setCurrentPlayer(null);
     }
   };
 
@@ -348,7 +412,7 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
 
   if (!audioURL) {
     return (
-      <div className="h-screen animated-gradient">
+      <div className="h-screen animated-gradient-generator">
         <div className="relative z-10 flex flex-col items-center justify-center h-full">
           <h1 className="text-white text-2xl font-bold">
             No audio recorded, problem!
@@ -359,28 +423,41 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
   }
 
   return (
-    <div className="h-screen animated-gradient">
+    <div className="h-screen animated-gradient-generator">
       <div className="relative z-10 flex flex-col items-center justify-center h-full">
-        <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg">
-          <h2 className="text-white text-2xl mb-6">Your Recorded Track</h2>
+        <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg text-center">
+          <h2 className={`text-white text-4xl mb-6`}>Your Recorded Track</h2>
           <audio controls src={audioURL} className="w-full mb-6" />
 
           <div className="flex flex-col items-center gap-4">
-            <p className="text-white text-lg">{modelStatus}</p>
-
-            <button
-              onClick={generateAccompaniment}
-              disabled={!model || isGenerating}
-              className={`px-6 py-3 rounded-lg transition-colors flex items-center gap-2 
+            <p className="text-white text-2xl">{modelStatus}</p>
+            <div className="flex flex-col items-center gap-2">
+              <button
+                onClick={generateAccompaniment}
+                disabled={!model || isGenerating}
+                className={`px-6 py-3 rounded-lg transition-colors flex items-center gap-2 
                 ${
                   !model || isGenerating
                     ? "bg-gray-500 cursor-not-allowed"
                     : "bg-jungle-green hover:bg-opacity-90"
                 } 
-                text-white`}
-            >
-              {isGenerating ? "Generating..." : "Generate Accompaniment"}
-            </button>
+                text-white text-xl`}
+              >
+                {isGenerating ? "Generating..." : "Generate Accompaniment"}
+              </button>
+
+              <button
+                onClick={() =>
+                  onClose?.({
+                    drumSequence: generatedTracks.drums,
+                    inputSequence: inputSequence,
+                  })
+                }
+                className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                Let's wrap this up
+              </button>
+            </div>
 
             {generatedTracks.drums && (
               <div className="w-full space-y-4 mt-4">
@@ -388,18 +465,41 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
                   <h3 className="text-white text-lg mb-2">Generated Drums</h3>
                   <button
                     onClick={() => playSample(generatedTracks.drums)}
-                    className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors"
+                    className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
                   >
-                    Play Drums
-                  </button>
-                </div>
-                <div>
-                  <h3 className="text-white text-lg mb-2">Generated Bass</h3>
-                  <button
-                    onClick={() => playSample(generatedTracks.bass)}
-                    className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors"
-                  >
-                    Play Bass
+                    {isPlaying ? (
+                      <>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        Stop Drums
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        Play Drums
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
