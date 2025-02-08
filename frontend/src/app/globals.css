@@ -3,19 +3,49 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --jungle-green: #2BAF90;
+  --celadon: #A1D4B1;
+  --orange-web: #F1A512;
+  --syracuse-red-orange: #DD4111;
+  --burgundy: #8C0027;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.bg-jungle-green {
+  background-color: var(--jungle-green);
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+.bg-celadon {
+  background-color: var(--celadon);
+}
+
+.bg-orange-web {
+  background-color: var(--orange-web);
+}
+
+.bg-syracuse-red-orange {
+  background-color: var(--syracuse-red-orange);
+}
+
+.bg-burgundy {
+  background-color: var(--burgundy);
+}
+
+.text-jungle-green {
+  color: var(--jungle-green);
+}
+
+.text-celadon {
+  color: var(--celadon);
+}
+
+.text-orange-web {
+  color: var(--orange-web);
+}
+
+.text-syracuse-red-orange {
+  color: var(--syracuse-red-orange);
+}
+
+.text-burgundy {
+  color: var(--burgundy);
 }
