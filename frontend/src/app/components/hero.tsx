@@ -1,7 +1,7 @@
 "use client";
 import "../globals.css";
 import { Monoton } from "next/font/google";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const monoton = Monoton({
   weight: "400",
@@ -10,9 +10,10 @@ const monoton = Monoton({
 
 interface HeroProps {
   onEnterStudio: () => void;
+  show: boolean;
 }
 
-export default function Hero({ onEnterStudio }: HeroProps) {
+export default function Hero({ onEnterStudio, show }: HeroProps) {
   const [isVisible, setIsVisible] = useState(true);
   const [isFading, setIsFading] = useState(false);
 
@@ -24,12 +25,12 @@ export default function Hero({ onEnterStudio }: HeroProps) {
     }, 500);
   };
 
-  if (!isVisible) return null;
+  if (!isVisible || !show) return null;
 
   return (
     <div
       className={`relative h-screen flex items-center justify-center overflow-hidden bg-black ${
-        isFading ? "fade-out" : ""
+        isFading ? "fade-out" : "fade-in"
       }`}
     >
       {/* Retro gradient background */}

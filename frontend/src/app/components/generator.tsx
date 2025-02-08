@@ -91,6 +91,8 @@ interface GeneratorProps {
     drumSequence: NoteSequence | null;
     inputSequence: NoteSequence | null;
   }) => void;
+  onBack?: () => void;
+  onNext?: () => void;
 }
 
 interface NoteSequence {
@@ -110,7 +112,13 @@ interface NoteSequence {
   totalQuantizedSteps?: number;
 }
 
-export default function Generator({ audioURL, show, onClose }: GeneratorProps) {
+export default function Generator({
+  audioURL,
+  show,
+  onClose,
+  onBack,
+  onNext,
+}: GeneratorProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [model, setModel] = useState<any | null>(null);
   const [modelStatus, setModelStatus] = useState<string>("");
@@ -118,10 +126,35 @@ export default function Generator({ audioURL, show, onClose }: GeneratorProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentPlayer, setCurrentPlayer] = useState<any>(null);
   const [inputSequence, setInputSequence] = useState<NoteSequence | null>(null);
+  const [isFading, setIsFading] = useState(false);
   const [generatedTracks, setGeneratedTracks] = useState<{
     drums: NoteSequence | null;
     bass: NoteSequence | null;
   }>({ drums: null, bass: null });
+
+  const handleBack = () => {
+    setIsFading(true);
+    setTimeout(() => {
+      onBack?.();
+    }, 500); // Match this with your fade-out animation duration
+  };
+
+  const handleNext = () => {
+    setIsFading(true);
+    setTimeout(() => {
+      onNext?.();
+    }, 500);
+  };
+
+  const handleClose = () => {
+    setIsFading(true);
+    setTimeout(() => {
+      onClose?.({
+        drumSequence: generatedTracks.drums,
+        inputSequence: inputSequence,
+      });
+    }, 500);
+  };
 
   // Initialize the Magenta model
   useEffect(() => {
@@ -412,10 +445,61 @@ export default function Generator({ audioURL, show, onClose }: GeneratorProps) {
 
   if (!audioURL) {
     return (
-      <div className="h-screen animated-gradient-generator">
+      <div
+        className={`h-screen animated-gradient-generator ${
+          isFading ? "fade-out" : "fade-in"
+        }`}
+      >
+
+        {/* Navigation Arrows */}
+      <div className="absolute top-1/2 left-6 transform -translate-y-1/2 z-20">
+        <button
+          onClick={handleBack}
+          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+      </div>
+      <div className="absolute top-1/2 right-6 transform -translate-y-1/2 z-20">
+        <button
+          onClick={handleNext}
+          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </button>
+      </div>
+
+
         <div className="relative z-10 flex flex-col items-center justify-center h-full">
-          <h1 className="text-white text-2xl font-bold">
-            No audio recorded, problem!
+          <h1 className="text-white text-xl font-bold">
+            Woah there rockstar, coming in a lil hot you think? Record your
+            track first.
           </h1>
         </div>
       </div>
@@ -423,7 +507,56 @@ export default function Generator({ audioURL, show, onClose }: GeneratorProps) {
   }
 
   return (
-    <div className="h-screen animated-gradient-generator">
+    <div
+      className={`h-screen animated-gradient-generator ${
+        isFading ? "fade-out" : "fade-in"
+      }`}
+    >
+      {/* Navigation Arrows */}
+      <div className="absolute top-1/2 left-6 transform -translate-y-1/2 z-20">
+        <button
+          onClick={handleBack}
+          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div className="absolute top-1/2 right-6 transform -translate-y-1/2 z-20">
+        <button
+          onClick={handleNext}
+          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </button>
+      </div>
+
       <div className="relative z-10 flex flex-col items-center justify-center h-full">
         <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg text-center">
           <h2 className={`text-white text-4xl mb-6`}>Your Recorded Track</h2>
@@ -447,12 +580,7 @@ export default function Generator({ audioURL, show, onClose }: GeneratorProps) {
               </button>
 
               <button
-                onClick={() =>
-                  onClose?.({
-                    drumSequence: generatedTracks.drums,
-                    inputSequence: inputSequence,
-                  })
-                }
+                onClick={handleClose}
                 className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 Let's wrap this up

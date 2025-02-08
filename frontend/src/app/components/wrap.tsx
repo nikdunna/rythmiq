@@ -37,13 +37,27 @@ interface WrapProps {
   drumSequence: NoteSequence | null;
   inputSequence: NoteSequence | null;
   show: boolean;
+  onBack?: () => void;
 }
 
-export default function Wrap({ drumSequence, inputSequence, show }: WrapProps) {
+export default function Wrap({
+  drumSequence,
+  inputSequence,
+  show,
+  onBack,
+}: WrapProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentPlayer, setCurrentPlayer] = useState<any>(null);
   const [error, setError] = useState<string>("");
   const [status, setStatus] = useState<string>("");
+  const [isFading, setIsFading] = useState(false);
+
+  const handleBack = () => {
+    setIsFading(true);
+    setTimeout(() => {
+      onBack?.();
+    }, 500); // Match this with your fade-out animation duration
+  };
 
   // ✅ **Dynamic Combination of Input & Drum Sequences**
   const getCombinedSequences = (): NoteSequence | null => {
@@ -170,8 +184,35 @@ export default function Wrap({ drumSequence, inputSequence, show }: WrapProps) {
   if (!show) return null;
 
   return (
-    <div className="h-screen animated-gradient-wrap">
-      <div className="relative z-10 flex flex-col items-center justify-center h-full fade-in">
+    <div
+      className={`h-screen animated-gradient-wrap ${
+        isFading ? "fade-out" : "fade-in"
+      }`}
+    >
+      {/* Navigation Arrows */}
+      <div className="absolute top-1/2 left-6 transform -translate-y-1/2 z-20">
+        <button
+          onClick={handleBack}
+          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div className="relative z-10 flex flex-col items-center justify-center h-full">
         <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg text-center">
           <h2 className={`${monoton.className} text-white text-4xl mb-6`}>
             Let's wrap this up

@@ -7,6 +7,8 @@ import { AudioVisualizerUtil } from "../utils/audioVisualizer";
 interface StudioProps {
   show: boolean;
   onAudioComplete?: (audioUrl: string) => void;
+  onBack?: () => void;
+  onNext?: () => void;
 }
 
 // Separate component for audio visualization
@@ -196,17 +198,86 @@ const AudioVisualizer = dynamic(
 );
 
 // Main Studio component
-export default function Studio({ show, onAudioComplete }: StudioProps) {
+export default function Studio({
+  show,
+  onAudioComplete,
+  onBack,
+  onNext,
+}: StudioProps) {
   const [mounted, setMounted] = useState(false);
+  const [isFading, setIsFading] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  const handleBack = () => {
+    setIsFading(true);
+    setTimeout(() => {
+      onBack?.();
+    }, 500); // Match this with your fade-out animation duration
+  };
+
+  const handleNext = () => {
+    setIsFading(true);
+    setTimeout(() => {
+      onNext?.();
+    }, 500);
+  };
+
   if (!show || !mounted) return null;
 
   return (
-    <div className="fade-in relative h-screen flex flex-col items-center justify-center overflow-hidden bg-black">
+    <div
+      className={`relative h-screen flex flex-col items-center justify-center overflow-hidden bg-black ${
+        isFading ? "fade-out" : "fade-in"
+      }`}
+    >
+      {/* Navigation Arrows */}
+      <div className="absolute top-1/2 left-6 transform -translate-y-1/2 z-20">
+        <button
+          onClick={handleBack}
+          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div className="absolute top-1/2 right-6 transform -translate-y-1/2 z-20">
+        <button
+          onClick={handleNext}
+          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </button>
+      </div>
+
       <AudioVisualizer onAudioComplete={onAudioComplete} />
     </div>
   );
