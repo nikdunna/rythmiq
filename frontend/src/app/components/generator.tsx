@@ -115,7 +115,7 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
 
         setModelStatus("Loading Magenta model...");
         const musicVAE = new mm.MusicVAE(
-          "https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_4bar"
+          "https://storage.googleapis.com/magentadata/js/checkpoints/groovae/tap2drum_2bar"
         );
 
         setModelStatus("Warming up the model...");
@@ -146,79 +146,46 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
     // Create a sequence with melody, drums, and bass
     const sequence: NoteSequence = {
       notes: [
-        // Melody (Program 0 - Piano)
-        ...Array.from({ length: 8 }, (_, i) => ({
-          pitch: [60, 64, 67, 72][i % 4], // C major arpeggio
-          quantizedStartStep: i * 4,
-          quantizedEndStep: i * 4 + 2,
-          velocity: 100,
+        // 🎶 **Melody (Program 0 - Piano) - C Major Scale**
+        ...Array.from({ length: 12 }, (_, i) => ({
+          pitch: [60, 62, 64, 67, 65, 69, 71, 72, 74, 76, 77, 79][i % 12],
+          quantizedStartStep: i * 2, // Notes every 2 steps
+          quantizedEndStep: i * 2 + (i % 4 === 0 ? 3 : 2), // Longer every 4th note
+          velocity: 85 + (i % 3) * 10, // Adds natural volume variation
           program: 0,
           isDrum: false,
-          startTime: i * 0.5,
+          startTime: i * 0.25, // Faster pacing
+          endTime: i * 0.25 + (i % 4 === 0 ? 0.75 : 0.5),
+        })),
+
+        // 🎵 **Syncopated notes for expressiveness**
+        ...Array.from({ length: 6 }, (_, i) => ({
+          pitch: [61, 66, 70, 73, 75, 78][i], // Grace note additions
+          quantizedStartStep: i * 4 + 1, // Slight offset for syncopation
+          quantizedEndStep: i * 4 + 2,
+          velocity: 75 + (i % 2) * 10,
+          program: 0,
+          isDrum: false,
+          startTime: i * 0.5 + 0.1, // Syncopation effect
           endTime: i * 0.5 + 0.25,
         })),
 
-        // **BASS LINE - BOOSTED LENGTH & VELOCITY**
-        ...Array.from({ length: 8 }, (_, i) => ({
-          pitch: [48, 48, 53, 53, 55, 55, 48, 48][i],
-          quantizedStartStep: i * 4,
-          quantizedEndStep: i * 4 + 8, // ✅ Make bass notes longer
-          velocity: 127, // ✅ Maximum volume to make bass more "important"
-          program: 32, // ✅ Correct bass program
+        // 🎼 **Longer Sustained Notes for Contrast**
+        ...Array.from({ length: 3 }, (_, i) => ({
+          pitch: [72, 74, 76][i], // Higher notes for contrast
+          quantizedStartStep: i * 8,
+          quantizedEndStep: i * 8 + 6, // Holding longer notes
+          velocity: 100,
+          program: 0,
           isDrum: false,
-        })),
-
-        // **Walking Bass Effect**
-        ...Array.from({ length: 8 }, (_, i) => ({
-          pitch: [51, 50, 55, 53, 57, 55, 50, 48][i], // Walking bass notes
-          quantizedStartStep: i * 4 + 2,
-          quantizedEndStep: i * 4 + 3, // Shorter passing notes
-          velocity: 110, // Slightly lower than root bass notes
-          program: 32,
-          isDrum: false,
-          startTime: i * 0.5 + 0.5,
-          endTime: i * 0.5 + 0.75, // ✅ Keeps motion in the bassline
-        })),
-
-        // **Drums**
-        // Kick drum
-        ...Array.from({ length: 8 }, (_, i) => ({
-          pitch: 36,
-          quantizedStartStep: i * 4,
-          quantizedEndStep: i * 4 + 1,
-          velocity: 95,
-          program: 0,
-          isDrum: true,
-          startTime: i * 0.5,
-          endTime: i * 0.5 + 0.125,
-        })),
-        // Snare
-        ...Array.from({ length: 4 }, (_, i) => ({
-          pitch: 38,
-          quantizedStartStep: i * 8 + 4,
-          quantizedEndStep: i * 8 + 5,
-          velocity: 90,
-          program: 0,
-          isDrum: true,
-          startTime: i * 1.0 + 0.5,
-          endTime: i * 1.0 + 0.625,
-        })),
-        // Hi-hat
-        ...Array.from({ length: 16 }, (_, i) => ({
-          pitch: 42,
-          quantizedStartStep: i * 2,
-          quantizedEndStep: i * 2 + 1,
-          velocity: 80,
-          program: 0,
-          isDrum: true,
-          startTime: i * 0.25,
-          endTime: i * 0.25 + 0.125,
+          startTime: i * 1.0,
+          endTime: i * 1.0 + 1.5,
         })),
       ],
       quantizationInfo: { stepsPerQuarter: 4 },
       tempos: [{ time: 0, qpm: 120 }],
-      totalQuantizedSteps: 32,
-      totalTime: 8.0,
+      totalQuantizedSteps: 32, // ✅ Model limit
+      totalTime: 8.0, // ✅ Matches 32-step limit
     };
 
     return sequence;
@@ -237,15 +204,6 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
       console.log("Input sequence:", inputSequence);
       setModelStatus("Generating accompaniment...");
 
-      //Bass check
-      console.log("Input sequence before encoding:", inputSequence);
-      console.log(
-        "Bass notes in input sequence:",
-        inputSequence.notes.filter(
-          (note) => !note.isDrum && (note.program === 32 || note.program === 34)
-        )
-      );
-
       // Generate accompaniment with higher temperature for more variation
       const z = await model.encode([inputSequence]);
       console.log("Encoded latent:", z);
@@ -255,27 +213,26 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
 
       // Generate multiple sequences and pick the best one
       const numTries = 15; // More attempts for better results
-      let bestSequence = null;
+      let drumSequence = null;
       let maxScore = 0;
+      const tempo = inputSequence.tempos[0].qpm;
 
       for (let i = 0; i < numTries; i++) {
         console.log(`Generation attempt ${i + 1}/${numTries}`);
-        const sequences = await model.decode(z, temperature);
+        const sequences = await model.decode(
+          z,
+          temperature,
+          undefined,
+          undefined,
+          tempo
+        );
         console.log(`Attempt ${i + 1} sequences:`, sequences);
 
         if (sequences && sequences[0]) {
-          console.log("🎶 Generated sequence:", sequences[0]);
           console.log(
             "🥁 Drum notes in generated sequence:",
             sequences[0].notes.filter(
               (note: NoteSequence["notes"][0]) => note.isDrum
-            )
-          );
-          console.log(
-            "🎸 Bass notes in generated sequence:",
-            sequences[0].notes.filter(
-              (note: NoteSequence["notes"][0]) =>
-                !note.isDrum && (note.program === 32 || note.program === 34)
             )
           );
           const sequence = sequences[0];
@@ -283,67 +240,36 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
           const drumNotes = sequence.notes.filter(
             (note: NoteSequence["notes"][0]) => note.isDrum
           ).length;
-          const bassNotes = sequence.notes.filter(
-            (note: NoteSequence["notes"][0]) =>
-              !note.isDrum && (note.program === 32 || note.program === 34)
-          ).length;
           // Adjust scoring to prefer more bass notes
-          const score = drumNotes * 2 + bassNotes * 5; // Weight bass notes higher
+          const score = drumNotes; // Weight bass notes higher
 
           console.log(
             `Attempt ${i + 1} score:`,
             score,
-            `(${drumNotes} drum notes, ${bassNotes} bass notes)`
+            `(${drumNotes} drum notes`
           );
 
           if (score > maxScore) {
             maxScore = score;
-            bestSequence = sequence;
+            drumSequence = sequence;
           }
         }
       }
 
-      if (!bestSequence || maxScore === 0) {
+      if (!drumSequence || maxScore === 0) {
         throw new Error(
           "Failed to generate valid sequences with sufficient notes"
         );
       }
 
-      console.log("Best sequence:", bestSequence);
-      console.log("Total notes in best sequence:", bestSequence.notes.length);
+      console.log("Best sequence:", drumSequence);
+      console.log("Total notes in best sequence:", drumSequence.notes.length);
       console.log("Score of best sequence:", maxScore);
 
-      // Separate drum and bass sequences
-      const drumsSequence = {
-        ...bestSequence,
-        notes: bestSequence.notes.filter(
-          (note: NoteSequence["notes"][0]) => note.isDrum
-        ),
-        totalTime: bestSequence.totalTime,
-        tempos: bestSequence.tempos,
-        quantizationInfo: bestSequence.quantizationInfo,
-      };
-
-      const bassSequence = {
-        ...bestSequence,
-        notes: bestSequence.notes.filter(
-          (note: NoteSequence["notes"][0]) =>
-            !note.isDrum && (note.program === 32 || note.program === 34)
-        ),
-        totalTime: bestSequence.totalTime,
-        tempos: bestSequence.tempos,
-        quantizationInfo: bestSequence.quantizationInfo,
-      };
-
-      console.log("Drums sequence:", drumsSequence);
-      console.log("Number of drum notes:", drumsSequence.notes.length);
-      console.log("Sample drum note:", drumsSequence.notes[0]);
-      console.log("Bass sequence:", bassSequence);
-      console.log("Number of bass notes:", bassSequence.notes.length);
-      console.log("Sample bass note:", bassSequence.notes[0]);
-
       // Store generated sequences
-      setGeneratedTracks({ drums: drumsSequence, bass: bassSequence });
+      setGeneratedTracks({ drums: drumSequence, bass: null });
+
+      z.dispose();
 
       setModelStatus("Generation complete!");
     } catch (err) {
@@ -379,12 +305,12 @@ export default function Generator({ audioURL, show }: GeneratorProps) {
         Tone.context,
         undefined,
         {
-          run: (note: any) => {
+          run: (note: any, currentTime: number) => {
             console.log("Playing note:", {
               pitch: note.pitch,
               velocity: note.velocity,
-              startTime: note.startTime,
-              endTime: note.endTime,
+              startTime: currentTime,
+              endTime: currentTime + (note.endTime - note.startTime),
               isDrum: note.isDrum,
               program: note.program,
             });
