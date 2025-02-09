@@ -1,4 +1,4 @@
-Ryhtmiq by: Nik Dunna, Benjamin Parker, Pratith , Angan Samadder
+Ryhtmiq by: Nik Dunna, Benjamin Parker, Pratith Pingili, Angan Samadder
 
 What is Rythmiq?
 
