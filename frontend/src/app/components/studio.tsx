@@ -211,6 +211,8 @@ export default function Studio({
   const [isFading, setIsFading] = useState(false);
   const [error, setError] = useState<string>("");
   const [tempo, setTempo] = useState(120);
+  const [recordingComplete, setRecordingComplete] = useState(false);
+  const [currentSequence, setCurrentSequence] = useState<any>(null);
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -240,10 +242,12 @@ export default function Studio({
   };
 
   const handleNext = () => {
-    setIsFading(true);
-    setTimeout(() => {
-      onNext?.();
-    }, 500);
+    if (currentSequence) {
+      setIsFading(true);
+      setTimeout(() => {
+        onAudioComplete(currentSequence);
+      }, 500);
+    }
   };
 
   const startRecording = async () => {
@@ -254,24 +258,38 @@ export default function Studio({
 
       setError("");
       setIsRecording(true);
+      setRecordingComplete(false);
+      setCurrentSequence(null);
       await midiCapture.startCapture();
+
+      // Set up a timer to handle automatic recording completion
+      setTimeout(() => {
+        if (midiCapture.isActive()) {
+          const noteSequence = midiCapture.stopCapture();
+          handleRecordingComplete(noteSequence);
+        }
+      }, (60 / tempo) * 24 * 1000); // 24 beats total (8 beats pre-count + 16 beats recording)
     } catch (err: any) {
       setError(err.message || "Failed to start MIDI recording");
       setIsRecording(false);
     }
   };
 
+  const handleRecordingComplete = (noteSequence: any) => {
+    setIsRecording(false);
+    setRecordingComplete(true);
+
+    // Convert NoteSequence to a data URL for compatibility with existing flow
+    const sequenceStr = JSON.stringify(noteSequence);
+    const dataUrl = `data:application/json;base64,${btoa(sequenceStr)}`;
+    setCurrentSequence(dataUrl);
+  };
+
   const stopRecording = () => {
     if (!midiCapture) return;
 
     const noteSequence = midiCapture.stopCapture();
-    setIsRecording(false);
-
-    // Convert NoteSequence to a data URL for compatibility with existing flow
-    const sequenceStr = JSON.stringify(noteSequence);
-    console.log("Generated NoteSequence:", noteSequence); // Debug log
-    const dataUrl = `data:application/json;base64,${btoa(sequenceStr)}`;
-    onAudioComplete(dataUrl);
+    handleRecordingComplete(noteSequence);
   };
 
   if (!show) return null;
@@ -308,7 +326,12 @@ export default function Studio({
       <div className="absolute top-1/2 right-6 transform -translate-y-1/2 z-20">
         <button
           onClick={handleNext}
-          className="p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+          disabled={!currentSequence}
+          className={`p-4 rounded-full ${
+            currentSequence
+              ? "bg-black/20 backdrop-blur-sm hover:bg-black/40"
+              : "bg-black/10 cursor-not-allowed"
+          } transition-colors text-white`}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -330,7 +353,7 @@ export default function Studio({
       <div className="relative z-10 flex flex-col items-center justify-center h-full">
         <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg">
           <h2 className="text-white text-4xl mb-6 text-center">
-            Record Your Melody
+            Start shredding, rockstar
           </h2>
 
           <div className="flex flex-col items-center gap-6">
@@ -356,16 +379,12 @@ export default function Studio({
             />
 
             <div className="flex gap-4">
-              <button
-                onClick={isRecording ? stopRecording : startRecording}
-                className={`px-6 py-3 rounded-lg transition-colors ${
-                  isRecording
-                    ? "bg-burgundy hover:bg-burgundy/90"
-                    : "bg-jungle-green hover:bg-jungle-green/90"
-                } text-white text-xl flex items-center gap-2`}
-              >
-                {isRecording ? (
-                  <>
+              {recordingComplete ? (
+                <div className="flex flex-col gap-4 items-center w-full">
+                  <button
+                    onClick={startRecording}
+                    className="px-6 py-3 bg-jungle-green hover:bg-jungle-green/90 text-white rounded-lg transition-colors flex items-center gap-2"
+                  >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       className="h-6 w-6"
@@ -377,19 +396,16 @@ export default function Studio({
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                       />
                     </svg>
-                    Stop Recording
-                  </>
-                ) : (
-                  <>
+                    Redo Recording
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    className="px-6 py-3 bg-orange-web hover:bg-opacity-90 text-white rounded-lg transition-colors flex items-center gap-2"
+                  >
+                    Let's Go
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       className="h-6 w-6"
@@ -401,13 +417,67 @@ export default function Studio({
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M19.5 12c0-4.142-3.358-7.5-7.5-7.5S4.5 7.858 4.5 12s3.358 7.5 7.5 7.5v-1.5M12 12l9 6-9-6z"
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
                       />
                     </svg>
-                    Start Recording
-                  </>
-                )}
-              </button>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`px-6 py-3 rounded-lg transition-colors flex items-center gap-2 
+                  ${
+                    isRecording
+                      ? "bg-burgundy hover:bg-burgundy/90"
+                      : "bg-jungle-green hover:bg-jungle-green/90"
+                  } 
+                  text-white text-xl`}
+                >
+                  {isRecording ? (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-6 w-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
+                        />
+                      </svg>
+                      Stop Recording
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-6 w-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19.5 12c0-4.142-3.358-7.5-7.5-7.5S4.5 7.858 4.5 12s3.358 7.5 7.5 7.5v-1.5M12 12l9 6-9-6z"
+                        />
+                      </svg>
+                      Start Recording
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
             {error && (
@@ -418,7 +488,7 @@ export default function Studio({
 
             <div className="text-white text-center">
               <p className="text-lg">
-                Connect your MIDI keyboard and play up to 32 steps.
+                Connect your MIDI keyboard and play up to 4 bars.
               </p>
               <p className="text-sm opacity-70">
                 The metronome will count in for 2 bars before recording starts.

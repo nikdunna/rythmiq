@@ -1,6 +1,3 @@
-// Remove the import
-// import { NoteSequence } from "@magenta/music";
-
 // Add our own interface
 interface NoteSequence {
     notes: Array<{
@@ -45,12 +42,38 @@ export class MidiCaptureUtil {
     isRecording: false,
     startTime: 0,
     metronome: null,
-    currentStep: -8, // Start at -8 to allow for 2 bars of pre-count (8 steps)
+    currentStep: -32, // Start at -8 to allow for 2 bars of pre-count (8 steps)
     stepsPerQuarter: 4,
     tempo: 120,
   };
 
-  constructor(private canvasRef: React.RefObject<HTMLCanvasElement>) {}
+  constructor(private canvasRef: React.RefObject<HTMLCanvasElement>) {
+    // Initialize the metronome visualization when the component mounts
+    this.initializeCanvas();
+    
+    // Add resize listener
+    window.addEventListener('resize', this.handleResize);
+  }
+
+  private handleResize = () => {
+    this.initializeCanvas();
+  };
+
+  private initializeCanvas = () => {
+    if (this.canvasRef.current) {
+      const canvas = this.canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Ensure canvas is properly sized
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        
+        // Draw initial metronome state
+        this.drawMetronome();
+      }
+    }
+  };
 
   setTempo = (newTempo: number) => {
     this.state.tempo = newTempo;
@@ -60,6 +83,9 @@ export class MidiCaptureUtil {
   };
 
   cleanup = () => {
+    // Remove resize listener
+    window.removeEventListener('resize', this.handleResize);
+
     if (this.state.metronome) {
       this.state.metronome.stop();
       this.state.metronome.cancel();
@@ -67,7 +93,7 @@ export class MidiCaptureUtil {
     this.state.activeNotes.clear();
     this.state.recordedNotes = [];
     this.state.isRecording = false;
-    this.state.currentStep = -8; // Reset to pre-count
+    this.state.currentStep = -32; // Reset to pre-count
     if (this.canvasRef.current) {
       const ctx = this.canvasRef.current.getContext('2d');
       if (ctx) {
@@ -79,7 +105,10 @@ export class MidiCaptureUtil {
   startCapture = async () => {
     try {
       this.cleanup();
-      this.state.currentStep = -8; // Reset to pre-count
+      this.state.currentStep = -32; // Reset to pre-count
+
+      // Initialize canvas and draw initial state
+      this.initializeCanvas();
 
       // Request MIDI access
       const midiAccess = await navigator.requestMIDIAccess();
@@ -103,33 +132,30 @@ export class MidiCaptureUtil {
       this.state.metronome = Tone.Transport;
       this.state.metronome.bpm.value = this.state.tempo;
 
+      // Start recording state before scheduling repeats
+      this.state.startTime = Tone.now();
+      this.state.isRecording = true;
+
+      // Start visualization immediately
+      this.drawVisualization();
+
       // Schedule metronome ticks with sound
       this.state.metronome.scheduleRepeat((time: number) => {
         this.state.currentStep++;
         this.drawMetronome();
-        
-        // Play metronome sound (higher pitch on first beat of bar)
-        const isFirstBeat = this.state.currentStep % 4 === 0;
-        metronomeSound.triggerAttackRelease(
-          isFirstBeat ? 'C5' : 'G4', 
-          '32n', 
-          time,
-          isFirstBeat ? 1 : 0.5
-        );
-        
-        // Stop recording after 32 steps of actual recording
-        if (this.state.currentStep >= 32) {
+
+        // Only play sound on quarter notes (every 4 steps)
+        if (this.state.currentStep % 4 === 0) {
+          metronomeSound.triggerAttackRelease("C5", "32n", time, 1);
+        }
+
+        if (this.state.currentStep >= 64) { // Extended to 4 bars (64 steps)
           this.stopCapture();
         }
       }, "16n"); // Sixteenth note intervals for 4 steps per quarter
 
-      // Start recording
-      this.state.startTime = Tone.now();
-      this.state.isRecording = true;
+      // Start the metronome
       this.state.metronome.start();
-
-      // Start visualization
-      this.drawVisualization();
 
       return true;
     } catch (err) {
@@ -144,7 +170,6 @@ export class MidiCaptureUtil {
     if (!this.state.isRecording || this.state.currentStep < 0) return;
 
     const [status, note, velocity] = event.data;
-    const Tone = require('tone');
     
     // Calculate time based on current step and tempo
     const stepsPerBeat = 4; // Since we're using 16th notes
@@ -156,7 +181,7 @@ export class MidiCaptureUtil {
       const midiNote: MidiNote = {
         pitch: note,
         startTime: currentTime,
-        velocity: velocity,
+        velocity: Math.min(Math.max(velocity, 20), 127), // Normalize velocity
         program: 0, // Piano
       };
       this.state.activeNotes.set(note, midiNote);
@@ -166,11 +191,29 @@ export class MidiCaptureUtil {
       const activeNote = this.state.activeNotes.get(note);
       if (activeNote) {
         activeNote.endTime = currentTime;
-        // Create a copy of the note before adding to recorded notes
-        this.state.recordedNotes.push({...activeNote});
+        if (activeNote.endTime - activeNote.startTime >= 0.05) { 
+          this.state.recordedNotes.push({...activeNote});
+        }
         this.state.activeNotes.delete(note);
       }
     }
+  };
+
+  private optimizeRecordedNotes = (notes: MidiNote[]): NoteSequence["notes"] => {
+    return notes
+      .filter((note, index, self) => {
+        const prevNote = self[index - 1];
+        return (
+          !prevNote || note.pitch !== prevNote.pitch || Math.abs(note.startTime - prevNote.startTime) > 0.05
+        );
+      })
+      .map((note) => ({
+        pitch: note.pitch,
+        startTime: Math.max(0, note.startTime),
+        endTime: Math.max(note.startTime + 0.1, note.endTime || note.startTime + 0.25),
+        velocity: note.velocity,
+        program: note.program,
+      }));
   };
 
   private drawVisualization = () => {
@@ -180,28 +223,38 @@ export class MidiCaptureUtil {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Ensure canvas is properly sized
+    const rect = canvas.getBoundingClientRect();
+    if (canvas.width !== rect.width || canvas.height !== rect.height) {
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+
     const draw = () => {
       if (!this.state.isRecording) return;
 
-      // Clear canvas
+      // Clear canvas below the metronome area
       ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 20, canvas.width, canvas.height - 20);
 
       // Draw active notes
       ctx.fillStyle = "#2BAF90";
       this.state.activeNotes.forEach((note) => {
         const x = (note.pitch - 21) * (canvas.width / 88); // 88 keys on piano
-        const y = canvas.height - (note.velocity / 127) * canvas.height;
-        ctx.fillRect(x, y, 10, 10);
+        const y = 20 + (canvas.height - 20 - (note.velocity / 127) * (canvas.height - 20));
+        ctx.fillRect(x, y, 15, 15);
       });
 
       // Draw recorded notes
       ctx.fillStyle = "#A1D4B1";
       this.state.recordedNotes.forEach((note) => {
         const x = (note.pitch - 21) * (canvas.width / 88);
-        const y = canvas.height - (note.velocity / 127) * canvas.height;
-        ctx.fillRect(x, y, 5, 5);
+        const y = 20 + (canvas.height - 20 - (note.velocity / 127) * (canvas.height - 20));
+        ctx.fillRect(x, y, 10, 10);
       });
+
+      // Draw metronome on every frame to ensure it's always visible
+      this.drawMetronome();
 
       requestAnimationFrame(draw);
     };
@@ -219,30 +272,60 @@ export class MidiCaptureUtil {
     // Clear previous metronome visualization
     ctx.clearRect(0, 0, canvas.width, 20);
 
-    // Draw pre-count or recording progress
-    const totalSteps = 32;
-    const beatWidth = canvas.width / totalSteps;
-    
-    // Draw all step markers
-    for (let i = 0; i < totalSteps; i++) {
-      const x = i * beatWidth;
+    // Constants for visualization
+    const totalPreCountSteps = 32; // 2 bars of pre-count
+    const totalRecordingSteps = 64; // 4 bars of recording
+    const totalSteps = totalPreCountSteps + totalRecordingSteps;
+    const beatWidth = canvas.width / totalSteps; // Width based on recording section
+
+    // Draw background for pre-count section
+    const preCountWidth = (totalPreCountSteps * beatWidth);
+    ctx.fillStyle = "rgba(139, 0, 0, 0.2)"; // Dark red for pre-count section
+    ctx.fillRect(0, 0, preCountWidth, 20);
+
+    // Draw background for recording section
+    ctx.fillStyle = "rgba(43, 175, 144, 0.2)"; // Jungle green for recording section
+    ctx.fillRect(preCountWidth, 0, canvas.width - preCountWidth, 20);
+
+    // Draw all step markers for both pre-count and recording
+    for (let i = -totalPreCountSteps; i < totalRecordingSteps; i++) {
+      const x = ((i + totalPreCountSteps) * beatWidth);
       const isMainBeat = i % 4 === 0;
-      ctx.fillStyle = isMainBeat ? "#F1A512" : "rgba(241, 165, 18, 0.3)";
+      
+      // Different colors for pre-count and recording sections
+      if (i < 0) {
+        ctx.fillStyle = isMainBeat ? "#FF4444" : "rgba(255, 68, 68, 0.3)";
+      } else {
+        ctx.fillStyle = isMainBeat ? "#F1A512" : "rgba(241, 165, 18, 0.3)";
+      }
+      
       ctx.fillRect(x, 0, 2, isMainBeat ? 20 : 10);
     }
 
-    // Draw current position if we're recording
-    if (this.state.currentStep >= 0 && this.state.currentStep < totalSteps) {
-      const x = this.state.currentStep * beatWidth;
+    // Draw current position
+    const currentX = ((this.state.currentStep + totalPreCountSteps) * beatWidth);
+    if (currentX >= 0 && currentX <= canvas.width) {
       ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(x - 1, 0, 4, 20);
+      ctx.fillRect(currentX - 1, 0, 4, 20);
+
+      // Show count-in numbers during pre-count
+      if (this.state.currentStep < 0) {
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "bold 20px Arial";
+        ctx.textAlign = "start";
+        const countInNumber = Math.floor((-this.state.currentStep - 1) / 4) + 1;
+        ctx.fillText(countInNumber.toString(), canvas.width / 2, 16);
+      }
     }
-    // Draw pre-count position
-    else if (this.state.currentStep < 0) {
-      ctx.fillStyle = "#FF0000";
-      const preCountText = Math.floor((-this.state.currentStep) / 4) + 1;
-      ctx.font = "20px Arial";
-      ctx.fillText(preCountText.toString(), canvas.width / 2, 16);
+
+    // Add labels
+    ctx.font = "12px Arial";
+    ctx.fillStyle = "#FFFFFF";
+    ctx.textAlign = "left";
+    if (this.state.currentStep < 0) {
+      ctx.fillText("Count In", 10, 14);
+    } else {
+      ctx.fillText("Recording", preCountWidth + 10, 14);
     }
   };
 
@@ -253,38 +336,30 @@ export class MidiCaptureUtil {
       this.state.metronome.cancel();
     }
 
-    // Convert any remaining active notes to recorded notes
     const secondsPerBeat = 60.0 / this.state.tempo;
     const currentTime = (this.state.currentStep / 4) * secondsPerBeat;
     
     this.state.activeNotes.forEach((note) => {
       note.endTime = currentTime;
-      this.state.recordedNotes.push({...note});
+      if (note.endTime - note.startTime >= 0.05) {
+        this.state.recordedNotes.push({...note});
+      }
     });
     this.state.activeNotes.clear();
 
-    // Log recorded notes before conversion
-    console.log("Recorded notes before conversion:", this.state.recordedNotes);
+    console.log("Recorded Notes:", this.state.recordedNotes);
 
-    // Convert recorded notes to NoteSequence format
+    const processedNotes = this.optimizeRecordedNotes(this.state.recordedNotes);
+
     const noteSequence: NoteSequence = {
-      notes: this.state.recordedNotes.map(note => ({
-        pitch: note.pitch,
-        startTime: note.startTime,
-        endTime: note.endTime || note.startTime + 0.25,
-        velocity: note.velocity,
-        program: note.program,
-      })),
+      notes: processedNotes,
       tempos: [{ time: 0, qpm: this.state.tempo }],
       quantizationInfo: { stepsPerQuarter: this.state.stepsPerQuarter },
-      totalQuantizedSteps: 32,
-      totalTime: 8.0, // 32 steps at 120 BPM = 8 seconds
+      totalQuantizedSteps: 64, // 4 bars * 16 steps per bar
+      totalTime: (60 / this.state.tempo) * 16 // Convert 16 beats to seconds based on tempo
     };
 
-    // Log the final note sequence
-    console.log("Final note sequence from MIDI capture:", noteSequence);
-    console.log("Sample note timing - First note:", noteSequence.notes[0]);
-
+    console.log("Final Optimized Note Sequence:", noteSequence);
     return noteSequence;
   };
 
