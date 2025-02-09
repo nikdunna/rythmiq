@@ -181,37 +181,36 @@ export default function Generator({
   }>({ drums: null, bass: null });
 
   // Initialize MIDI output
-  useEffect(() => {
-    const initMIDI = async () => {
-      try {
-        if (navigator.requestMIDIAccess) {
-          const midiAccess = await navigator.requestMIDIAccess();
-          const outputs = Array.from(midiAccess.outputs.values());
-          if (outputs.length > 0) {
-            setMidiOutput(outputs[0]);
-            console.log("✅ MIDI output initialized:", outputs[0].name);
-          } else {
-            console.log("⚠ No MIDI outputs available");
-          }
-        } else {
-          console.log("⚠ Web MIDI API not supported");
-        }
-      } catch (err) {
-        console.error("❌ Error initializing MIDI:", err);
-      }
-    };
+  // useEffect(() => {
+  //   const initMIDI = async () => {
+  //     try {
+  //       if (navigator.requestMIDIAccess) {
+  //         const midiAccess = await navigator.requestMIDIAccess();
+  //         const outputs = Array.from(midiAccess.outputs.values());
+  //         if (outputs.length > 0) {
+  //           setMidiOutput(outputs[0]);
+  //           console.log("✅ MIDI output initialized:", outputs[0].name);
+  //         } else {
+  //           console.log("⚠ No MIDI outputs available");
+  //         }
+  //       } else {
+  //         console.log("⚠ Web MIDI API not supported");
+  //       }
+  //     } catch (err) {
+  //       console.error("❌ Error initializing MIDI:", err);
+  //     }
+  //   };
 
-    initMIDI();
-  }, []);
+  //   initMIDI();
+  // }, []);
 
-  // Parse the input NoteSequence from the base64 URL
+  // Parse the input NoteSequence and auto-generate drums when ready
   useEffect(() => {
     if (audioURL) {
       try {
-        console.log("Received audioURL:", audioURL); // Debug log
+        console.log("Received audioURL:", audioURL);
         const base64Data = audioURL.split(",")[1];
         const jsonStr = atob(base64Data);
-        console.log("Decoded JSON:", jsonStr); // Debug log
         const sequence = JSON.parse(jsonStr) as NoteSequence;
 
         // Set program to 24 (electric guitar nylon) for all notes
@@ -220,18 +219,18 @@ export default function Generator({
           program: 24, // Electric guitar nylon
         }));
 
-        console.log(
-          "Parsed sequence in Generator with guitar program:",
-          sequence
-        );
-        console.log("First note timing and program:", sequence.notes[0]);
         setInputSequence(sequence);
+
+        // Auto-generate drums when input sequence is ready and model is loaded
+        if (model) {
+          generateAccompaniment();
+        }
       } catch (err) {
         console.error("Failed to parse input sequence:", err);
         setError("Failed to parse input sequence");
       }
     }
-  }, [audioURL]);
+  }, [audioURL, model]); // Add model to dependencies
 
   const handleBack = () => {
     setIsFading(true);
@@ -257,6 +256,33 @@ export default function Generator({
     }, 500);
   };
 
+  //Ensure readiness
+  useEffect(() => {
+    if (audioURL && model) {
+      try {
+        console.log("Received audioURL:", audioURL);
+        const base64Data = audioURL.split(",")[1];
+        const jsonStr = atob(base64Data);
+        const sequence = JSON.parse(jsonStr) as NoteSequence;
+
+        sequence.notes = sequence.notes.map((note) => ({
+          ...note,
+          program: 24, // Electric guitar nylon
+        }));
+
+        setInputSequence(sequence);
+
+        // 🔥 Only generate if the model is **fully initialized**
+        if (model.isInitialized && sequence.notes.length > 0) {
+          generateAccompaniment();
+        }
+      } catch (err) {
+        console.error("Failed to parse input sequence:", err);
+        setError("Failed to parse input sequence");
+      }
+    }
+  }, [audioURL, model]);
+
   // Initialize the Magenta model
   useEffect(() => {
     const initModel = async () => {
@@ -275,6 +301,11 @@ export default function Generator({
         await musicVAE.initialize();
         setModel(musicVAE);
         setModelStatus("Model ready!");
+
+        // If we already have an input sequence, generate drums
+        if (inputSequence) {
+          generateAccompaniment();
+        }
       } catch (err) {
         console.error("Initialization error details:", err);
         setError("Model initialization failed");
@@ -284,7 +315,6 @@ export default function Generator({
 
     initModel();
 
-    // Cleanup
     return () => {
       if (model) {
         model.dispose();
@@ -304,17 +334,31 @@ export default function Generator({
       return;
     }
 
+    setIsGenerating(true);
+    setModelStatus("Generating drums...");
+
     try {
-      const processedSequence: NoteSequence =
-        preprocessNoteSequence(inputSequence);
+      const sq: NoteSequence = preprocessNoteSequence(inputSequence);
+
+      // ✅ Fix the timing of the notes
+      const quant = mm.sequences.quantizeNoteSequence(sq, 4);
+      const unquant = mm.sequences.unquantizeSequence(quant);
+
+      for (let i = 0; i < unquant.notes.length; i++) {
+        delete unquant.notes[i].quantizedStartStep;
+        delete unquant.notes[i].quantizedEndStep;
+      }
+      delete unquant.totalQuantizedSteps;
+      delete unquant.quantizationInfo;
+
+      const processedSequence = unquant;
 
       const temperature = 0.6; // Higher temperature for more variation
       console.log("Using temperature:", temperature);
 
       const tempo = inputSequence.tempos[0].qpm;
       const z = await model.encode([processedSequence]);
-      // Generate multiple sequences and pick the best one
-      const numTries = 15; // More attempts for better results
+      const numTries = 15;
       let drumSequence = null;
       let maxScore = 0;
 
@@ -386,10 +430,13 @@ export default function Generator({
 
       z.dispose();
 
-      setModelStatus("Generation complete!");
+      setModelStatus(
+        "Generation complete! Click 'Regenerate' for a different variation."
+      );
     } catch (err) {
       console.error("Generation error:", err);
       setError("Failed to generate accompaniment");
+      setModelStatus("Generation failed. Try regenerating.");
     } finally {
       setIsGenerating(false);
     }
@@ -595,9 +642,11 @@ export default function Generator({
       </div>
 
       <div className="absolute top-1/2 right-6 transform -translate-y-1/2 z-20">
-      <button
+        <button
           onClick={handleClose}
-          className={"p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"}
+          className={
+            "p-4 rounded-full bg-black/20 backdrop-blur-sm hover:bg-black/40 transition-colors text-white"
+          }
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -622,11 +671,11 @@ export default function Generator({
             Phew, that's what I call a track
           </h2>
 
-          {/* Replace audio element with MIDI playback button */}
-          <div className="mb-6">
+          {/* Audio playback controls */}
+          <div className="mb-4 flex flex-row gap-4 items-center justify-center">
             <button
               onClick={() => playSample(inputSequence)}
-              className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              className="w-full px-4 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
             >
               {isPlaying ? (
                 <>
@@ -662,13 +711,54 @@ export default function Generator({
                 </>
               )}
             </button>
+
+            {generatedTracks.drums && (
+              <button
+                onClick={() => playSample(generatedTracks.drums)}
+                className="w-full px-4 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isPlaying ? (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    Stop Drums
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    Play Drums
+                  </>
+                )}
+              </button>
+            )}
           </div>
 
           <div className="flex flex-col items-center gap-4">
             <p className="text-white text-2xl">{modelStatus}</p>
             <div className="flex flex-col items-center gap-2">
               <button
-                onClick={generateAccompaniment}
+                onClick={() => generateAccompaniment()}
                 disabled={!model || isGenerating}
                 className={`px-6 py-3 rounded-lg transition-colors flex items-center gap-2 
                 ${
@@ -678,7 +768,7 @@ export default function Generator({
                 } 
                 text-white text-xl`}
               >
-                {isGenerating ? "Generating..." : "Generate Accompaniment"}
+                {isGenerating ? "Generating..." : "Regenerate Accompaniment"}
               </button>
 
               <button
@@ -703,52 +793,6 @@ export default function Generator({
                 Let's wrap this up
               </button>
             </div>
-
-            {generatedTracks.drums && (
-              <div className="w-full space-y-4 mt-4">
-                <div>
-                  <h3 className="text-white text-lg mb-2">Generated Drums</h3>
-                  <button
-                    onClick={() => playSample(generatedTracks.drums)}
-                    className="w-full px-6 py-3 bg-jungle-green/20 hover:bg-jungle-green/30 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
-                  >
-                    {isPlaying ? (
-                      <>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        Stop Drums
-                      </>
-                    ) : (
-                      <>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        Play Drums
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {error && (
               <div className="text-burgundy bg-burgundy/10 p-4 rounded-lg">
