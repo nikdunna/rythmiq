@@ -1,58 +1,42 @@
-'use client'
-import fs from "fs";
-import axios from "axios";
-import path from "path";
-import formidable from "formidable";
-import { NextApiRequest, NextApiResponse } from "next";
+"use client";
 
-export const config = {
-  api: { bodyParser: false }, // Disable default Next.js body parsing
-};
+import { useState } from "react";
+import { pinata } from "@/app/utils/config";
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
+export default function Home() {
+  const [file, setFile] = useState<File>();
+  const [uploading, setUploading] = useState(false);
 
-  // Create a Formidable instance correctly
-  const form = formidable({ 
-    uploadDir: "/tmp", 
-    filename: (name, ext, part) => `${Date.now()}_${part.originalFilename}`
-  });
-
-  try {
-    const [fields, files] = await form.parse(req);
-
-    // Ensure file exists
-    if (!files.file || !files.file[0]?.filepath) {
-      return res.status(400).json({ error: "No file uploaded" });
+  const uploadFile = async () => {
+    if (!file) {
+      alert("No file selected");
+      return;
     }
 
-    const filePath = files.file[0].filepath;
-    const fileStream = fs.createReadStream(filePath);
+    try {
+      setUploading(true);
+      const keyRequest = await fetch("/api/key");
+      const keyData = await keyRequest.json();
+      const upload = await pinata.upload.file(file).key(keyData.JWT);
+      console.log(upload);
+      setUploading(false);
+    } catch (e) {
+      console.log(e);
+      setUploading(false);
+      alert("Trouble uploading file");
+    }
+  };
 
-    // Upload file to Pinata
-    const pinataResponse = await axios.post(
-      "https://api.pinata.cloud/pinning/pinFileToIPFS",
-      fileStream,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          Authorization: `Bearer ${process.env.PINATA_JWT}`, // Your Pinata API Key
-        },
-      }
-    );
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFile(e.target?.files?.[0]);
+  };
 
-    const ipfsHash = pinataResponse.data.IpfsHash;
-    console.log("IPFS Upload Success:", ipfsHash);
-
-    // Cleanup temp file
-    fs.unlinkSync(filePath);
-
-    res.json({ success: true, ipfsHash });
-  } catch (error) {
-    // Explicitly cast `error` as `Error`
-    const errMessage = error instanceof Error ? error.message : "Unknown error";
-    console.error("File Upload Error:", errMessage);
-
-    res.status(500).json({ error: "IPFS Upload Failed", details: errMessage });
-  }
+  return (
+    <main className="w-full min-h-screen m-auto flex flex-col justify-center items-center">
+      <input type="file" onChange={handleChange} />
+      <button type="button" disabled={uploading} onClick={uploadFile}>
+        {uploading ? "Uploading..." : "Upload"}
+      </button>
+    </main>
+  );
 }
