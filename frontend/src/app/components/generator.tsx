@@ -42,7 +42,7 @@ const patchMagentaGrooveConverter = () => {
           startTime: note.startTime ?? 0,
           endTime: note.endTime ?? (note.startTime ?? 0) + 0.25,
           velocity: note.velocity ?? 100,
-          program: note.isDrum ? 0 : 24, // Default electric guitar if not a drum
+          program: note.isDrum ? 0 : 29, // Default electric guitar if not a drum
           isDrum: note.isDrum ?? false,
           quantizedStartStep: note.quantizedStartStep ?? 0,
           quantizedEndStep: note.quantizedEndStep ?? 1,
@@ -213,10 +213,10 @@ export default function Generator({
         const jsonStr = atob(base64Data);
         const sequence = JSON.parse(jsonStr) as NoteSequence;
 
-        // Set program to 24 (electric guitar nylon) for all notes
+        // Set program to 29 (electric guitar nylon) for all notes
         sequence.notes = sequence.notes.map((note) => ({
           ...note,
-          program: 24, // Electric guitar nylon
+          program: 29, // Electric guitar nylon
         }));
 
         setInputSequence(sequence);
@@ -267,7 +267,7 @@ export default function Generator({
 
         sequence.notes = sequence.notes.map((note) => ({
           ...note,
-          program: 24, // Electric guitar nylon
+          program: 29, // Electric guitar nylon
         }));
 
         setInputSequence(sequence);
@@ -353,7 +353,7 @@ export default function Generator({
 
       const processedSequence = unquant;
 
-      const temperature = 0.6; // Higher temperature for more variation
+      const temperature = 0.1; // Higher temperature for more variation
       console.log("Using temperature:", temperature);
 
       const tempo = inputSequence.tempos[0].qpm;
@@ -459,7 +459,7 @@ export default function Generator({
         startTime: (note.startTime ?? 0) - firstNoteStartTime,
         endTime:
           (note.endTime ?? (note.startTime ?? 0) + 0.25) - firstNoteStartTime,
-        program: note.isDrum ? 0 : 24,
+        program: note.isDrum ? 0 : 29,
         isDrum: note.isDrum ?? false,
         velocity: note.velocity ?? 100,
       })),
@@ -755,7 +755,7 @@ export default function Generator({
           </div>
 
           <div className="flex flex-col items-center gap-4">
-            <p className="text-white text-2xl">{modelStatus}</p>
+            {/* <p className="text-white text-2xl">{modelStatus}</p> */}
             <div className="flex flex-col items-center gap-2">
               <button
                 onClick={() => generateAccompaniment()}

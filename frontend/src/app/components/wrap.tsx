@@ -51,6 +51,7 @@ export default function Wrap({
   const [error, setError] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [isFading, setIsFading] = useState(false);
+  const [isLooping, setIsLooping] = useState(false);
 
   const handleBack = () => {
     setIsFading(true);
@@ -82,11 +83,15 @@ export default function Wrap({
         stepsPerQuarter: 4,
       },
       totalQuantizedSteps: 0,
-      totalTime: 0,
+      totalTime: 0, // Will be recalculated
     };
+
+    let maxEndTime = 0;
+    let minStartTime = Infinity;
 
     sequences.forEach((seq) => {
       if (!seq || !seq.notes) return;
+
       seq.notes.forEach((note) => {
         combinedSequence.notes.push({
           pitch: note.pitch,
@@ -96,14 +101,24 @@ export default function Wrap({
           program: note.isDrum ? 0 : note.program || 24,
           isDrum: note.isDrum || false,
         });
-      });
 
-      combinedSequence.totalTime = Math.max(
-        combinedSequence.totalTime || 8,
-        seq.totalTime || 8
-      );
+        // Track the latest endTime and earliest startTime
+        maxEndTime = Math.max(maxEndTime, note.endTime || 0);
+        minStartTime = Math.min(minStartTime, note.startTime || 0);
+      });
     });
 
+    // ✅ Ensure the sequence starts exactly at 0
+    combinedSequence.notes = combinedSequence.notes.map((note) => ({
+      ...note,
+      startTime: (note.startTime ?? 0) - minStartTime,
+      endTime: (note.endTime ?? 0) - minStartTime,
+    }));
+
+    // ✅ Trim any extra space by setting totalTime to the last note's endTime
+    combinedSequence.totalTime = maxEndTime - minStartTime;
+
+    console.log("✅ Trimmed sequence totalTime:", combinedSequence.totalTime);
     return combinedSequence;
   };
 
@@ -167,9 +182,17 @@ export default function Wrap({
         },
         stop: () => {
           console.log("⏹ Playback stopped");
-          setIsPlaying(false);
-          setCurrentPlayer(null);
-          setStatus("Playback complete");
+          if (isLooping) {
+            console.log("🔁 Restarting playback...");
+            (async () => {
+              await player.loadSamples(processedSequence); // ✅ Properly await inside an async IIFE
+              player.start({ ...processedSequence }); // ✅ Restart the sequence with a fresh copy
+            })();
+          } else {
+            setIsPlaying(false);
+            setCurrentPlayer(null);
+            setStatus("Playback complete");
+          }
         },
       };
 
@@ -179,7 +202,7 @@ export default function Wrap({
 
       setIsPlaying(true);
       setCurrentPlayer(player);
-      setStatus("Playing combined track...");
+      setStatus(isLooping ? "Playing in loop..." : "Playing combined track...");
       await player.start(processedSequence);
     } catch (err) {
       console.error("❌ Playback error:", err);
@@ -222,14 +245,14 @@ export default function Wrap({
 
       <div className="relative z-10 flex flex-col items-center justify-center h-full">
         <div className="w-[80%] max-w-3xl bg-black/20 backdrop-blur-sm p-8 rounded-lg text-center">
-          <h2 className={`${monoton.className} text-white text-4xl mb-6`}>
+          <h2 className={` text-white text-4xl mb-6`}>
             Let's wrap this up
           </h2>
 
           <div className="flex flex-col items-center gap-6">
-            <p className="text-white text-xl">
+            {/* <p className="text-white text-xl">
               {status || "Ready to play your masterpiece"}
-            </p>
+            </p> */}
 
             <button
               onClick={playCombined}
@@ -265,9 +288,32 @@ export default function Wrap({
                       clipRule="evenodd"
                     />
                   </svg>
-                  Play Combined Track
+                  {isLooping ? "Play in Loop" : "Play Combined Track"}
                 </>
               )}
+            </button>
+
+            <button
+              onClick={() => setIsLooping(!isLooping)}
+              className={`mt-2 px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                isLooping
+                  ? "bg-jungle-green text-white"
+                  : "bg-jungle-green/20 text-white hover:bg-jungle-green/30"
+              }`}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {isLooping ? "Loop On" : "Loop Off"}
             </button>
 
             {error && (
